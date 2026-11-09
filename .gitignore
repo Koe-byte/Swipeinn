@@ -1,0 +1,30 @@
+# Built-in Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# AI Agent & Workspace Tools
+.agents/
+AGENTS.md
+graphify-out/
+.obsidian/
+.scratch/
+
+# Discussion & Planning Docs (Keep local)
+PRD-HARDENED-MVP.md
+GLOSSARY.md
+
+# Crash logs & system dumps
+*.log
+hs_err_pid*

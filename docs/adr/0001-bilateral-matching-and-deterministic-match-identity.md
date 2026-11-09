@@ -1,0 +1,3 @@
+# Bilateral Matching Mechanism and Deterministic Match Identity
+
+In Rently's serverless client-driven Flutter and Firebase architecture, matches must be generated without server-side Cloud Functions while preventing race conditions, duplicate conversations, or asymmetric matching states. We decided that Landlords swipe strictly on listing-specific Review Queues, and matches are created using deterministic document IDs (`${listingId}_${studentUid}`) inside a Firestore batch write that validates reciprocal likes. This guarantees idempotency, clean security rule validation, and avoids duplicate match threads.

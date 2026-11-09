@@ -1,0 +1,3 @@
+# Automated Verification Flow and Seeding Strategy for MVP
+
+To enable frictionless evaluation during the course final demo without relying on an administrative manual review team, Rently implements a dual-mode verification pipeline: Student accounts using institutional campus email domains (`@*.edu` or approved university domains) receive an automated Verified Badge immediately upon registration, with an optional ID photo upload for non-edu domains. Additionally, to protect the single developer's delivery timeline and empower the two UI/UX designers, an embedded debug Seeding Utility is included in development builds to populate 20 realistic dorm listings and realistic student swipes with one tap.

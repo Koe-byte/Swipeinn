@@ -1,0 +1,24 @@
+# Flutter Analysis Options
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    missing_required_param: error
+    missing_return: error
+    todo: ignore
+    use_super_parameters: ignore
+    deprecated_member_use: ignore
+    prefer_const_constructors: ignore
+    prefer_const_literals_to_create_immutables: ignore
+    unnecessary_to_list_in_spreads: ignore
+  exclude:
+    - build/**
+    - android/**
+    - web/**
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    prefer_final_fields: true
+    unnecessary_nullable_for_final_variable_declarations: true
