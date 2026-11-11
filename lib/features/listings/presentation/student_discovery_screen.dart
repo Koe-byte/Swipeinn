@@ -82,7 +82,7 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
                       },
                       onLike: () {
                         final currentListing = listings[_currentIndex];
-                        final user = ref.read(authStateProvider).value;
+                        final user = ref.read(authStateProvider).valueOrNull;
                         final studentUid = user?.uid ?? 'student_sample_1';
                         // Record like intent in state
                         final likesMap = ref.read(studentLikesProvider);
@@ -138,7 +138,7 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
                         elevation: 4,
                         onPressed: () {
                           final currentListing = listings[_currentIndex];
-                          final user = ref.read(authStateProvider).value;
+                          final user = ref.read(authStateProvider).valueOrNull;
                           final studentUid = user?.uid ?? 'student_sample_1';
                           final likesMap = ref.read(studentLikesProvider);
                           final set = likesMap[currentListing.id] ?? {};

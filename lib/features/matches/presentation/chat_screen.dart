@@ -4,6 +4,7 @@ import '../domain/match_model.dart';
 import 'matches_provider.dart';
 import '../../auth/presentation/auth_provider.dart';
 import '../../auth/domain/user_model.dart';
+import '../../../core/services/database_service.dart';
 import '../../../core/theme/app_theme.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -37,7 +38,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       orElse: () => widget.match,
     );
     final messages = ref.watch(messagesProvider(widget.match.id));
-    final user = ref.watch(authStateProvider).value;
+    final user = ref.watch(authStateProvider).valueOrNull;
     final isStudent = user?.role == UserRole.student;
     final isMatchActive = currentMatch.status == MatchStatus.active && !currentMatch.isExpired;
     final needsFirstMove = currentMatch.messagesCount == 0;
@@ -57,15 +58,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.swap_horiz, color: AppTheme.navyDark),
-            tooltip: isStudent ? 'Switch to Host view' : 'Switch to Student view',
-            onPressed: () {
-              ref.read(authStateProvider.notifier).switchRole(
-                    isStudent ? UserRole.landlord : UserRole.student,
-                  );
-            },
-          ),
+          // Role switching is intentionally unavailable inside an active chat.
           IconButton(
             icon: const Icon(Icons.shield_outlined),
             onPressed: () => _showSafetySheet(context),
@@ -257,7 +250,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       (m) => m.id == widget.match.id,
       orElse: () => widget.match,
     );
-    final user = ref.read(authStateProvider).value;
+    final user = ref.read(authStateProvider).valueOrNull;
     final isStudent = user?.role == UserRole.student;
     final senderUid = isStudent ? currentMatch.studentUid : currentMatch.landlordUid;
 
@@ -267,8 +260,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         );
     ref.read(matchesProvider.notifier).incrementMessageCount(widget.match.id);
 
-    // If student just sent first move or inquiry, simulate responsive landlord reply
-    if (isStudent && currentMatch.messagesCount == 0) {
+    // If student just sent first move or inquiry, simulate a responsive
+    // landlord reply in local/demo mode only. With Firebase configured, the
+    // write would be attributed to the landlord and rejected by the rules.
+    if (isStudent &&
+        currentMatch.messagesCount == 0 &&
+        DatabaseService.instance.firestore == null) {
       Future.delayed(const Duration(milliseconds: 600), () {
         if (!mounted) return;
         ref.read(messagesProvider(widget.match.id).notifier).sendMessage(
@@ -286,7 +283,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       (m) => m.id == widget.match.id,
       orElse: () => widget.match,
     );
-    final user = ref.read(authStateProvider).value;
+    final user = ref.read(authStateProvider).valueOrNull;
     final isStudent = user?.role == UserRole.student;
     final senderUid = isStudent ? currentMatch.studentUid : currentMatch.landlordUid;
 

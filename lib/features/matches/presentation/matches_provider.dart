@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/match_model.dart';
 import '../data/chat_repository.dart';
+import '../../../core/services/database_service.dart';
 
 export '../data/chat_repository.dart' show chatDatabaseRepositoryProvider, ChatDatabaseRepository;
 
@@ -18,6 +19,12 @@ class MatchesNotifier extends StateNotifier<List<MatchModel>> {
   }
 
   void _initSampleMatches() {
+    // Synthetic participants (`student_sample_1`, `landlord_101`) are not real
+    // Firebase Auth UIDs, so Firestore security rules reject them. Only seed
+    // this demo content in local mode; real accounts start empty and build
+    // matches through the likes flow.
+    if (DatabaseService.instance.firestore != null) return;
+
     final sampleMatch = MatchModel(
       id: 'listing_01_student_sample_1',
       listingId: 'listing_01',
@@ -112,7 +119,8 @@ class MessagesNotifier extends StateNotifier<List<MessageModel>> {
   }
 
   void _initMessages() {
-    if (matchId == 'listing_01_student_sample_1') {
+    if (matchId == 'listing_01_student_sample_1' &&
+        DatabaseService.instance.firestore == null) {
       final initialSample = [
         MessageModel(
           id: 'msg_1',

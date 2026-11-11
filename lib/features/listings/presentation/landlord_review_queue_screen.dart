@@ -53,7 +53,7 @@ class _LandlordReviewQueueScreenState extends ConsumerState<LandlordReviewQueueS
     final likedStudentUids = likesMap[widget.listing.id] ?? {};
 
     // Filter students who actually liked this listing
-    final user = ref.watch(authStateProvider).value;
+    final user = ref.watch(authStateProvider).valueOrNull;
     final allStudents = [
       if (user != null && user.role == UserRole.student && !_interestedStudents.any((s) => s.uid == user.uid))
         user,

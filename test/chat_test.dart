@@ -5,8 +5,17 @@ import 'package:rently/features/auth/domain/user_model.dart';
 import 'package:rently/features/auth/presentation/auth_provider.dart';
 import 'package:rently/features/matches/presentation/matches_provider.dart';
 import 'package:rently/features/matches/presentation/chat_screen.dart';
+import 'package:rently/core/services/database_service.dart';
 
 void main() {
+  setUp(() {
+    DatabaseService.instance.resetForTesting();
+  });
+
+  tearDown(() {
+    DatabaseService.instance.resetForTesting();
+  });
+
   testWidgets('Chat screen message alignment: Student messages on right for student, on left for landlord', (tester) async {
     final container = ProviderContainer();
 
@@ -134,7 +143,7 @@ void main() {
         reason: 'First move banner should disappear once a message is sent');
   });
 
-  testWidgets('Chat screen role toggle switches view perspective smoothly', (tester) async {
+  testWidgets('Chat screen does not expose a role switcher in the AppBar', (tester) async {
     final container = ProviderContainer();
 
     await container.read(authStateProvider.notifier).signInWithRole(
@@ -155,17 +164,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Initially as student: Student message is on the right
+    // Users must not be able to switch Student/Landlord roles inside a chat.
+    expect(find.byIcon(Icons.swap_horiz), findsNothing);
+
+    // Student still sees their own message on the right.
     final msg1Finder = find.text('Hi! I am looking for a November move-in—when can I view the unit?');
-    Align alignWidget = tester.widget(find.ancestor(of: msg1Finder, matching: find.byType(Align)).first);
+    final Align alignWidget = tester.widget(find.ancestor(of: msg1Finder, matching: find.byType(Align)).first);
     expect(alignWidget.alignment, Alignment.centerRight);
-
-    // Tap role switch button in AppBar
-    await tester.tap(find.byIcon(Icons.swap_horiz));
-    await tester.pumpAndSettle();
-
-    // Now as landlord: Student message is on the left
-    alignWidget = tester.widget(find.ancestor(of: msg1Finder, matching: find.byType(Align)).first);
-    expect(alignWidget.alignment, Alignment.centerLeft);
   });
 }

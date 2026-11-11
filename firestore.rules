@@ -1,73 +1,95 @@
 rules_version = '2';
+
+// Rently Firestore security model
+// ---------------------------------------------------------------------------
+// Every document is owned by the authenticated Firebase Auth UID.
+// The app must write users/{auth.uid}, matches/{id} where auth.uid is a
+// participant, and matches/{id}/messages/{id} with senderUid == auth.uid.
+// Demo/mock identities must be real Firebase Auth accounts, never synthetic
+// document IDs such as "student_sample_1".
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
-    function isAuthenticated() {
+    function isSignedIn() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
     }
 
-    // User profiles & Private swipes
-    match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(userId);
+    function isParticipant(data) {
+      return isSignedIn() && (
+        data.studentUid == request.auth.uid ||
+        data.landlordUid == request.auth.uid
+      );
+    }
 
-      // Private swipe actions (left and right swipes strictly private to the user)
+    function matchData(matchId) {
+      return get(/databases/$(database)/documents/matches/$(matchId)).data;
+    }
+
+    function isMatchParticipant(matchId) {
+      return isSignedIn() && (
+        matchData(matchId).studentUid == request.auth.uid ||
+        matchData(matchId).landlordUid == request.auth.uid
+      );
+    }
+
+    // User profiles and private swipes. Profiles are private to their owner.
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
       match /swipes/{targetId} {
         allow read, write: if isOwner(userId);
       }
     }
 
-    // Listings published by landlords
-    match /listings/{listingId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.resource.data.landlordUid == request.auth.uid;
-      allow update, delete: if isAuthenticated() && resource.data.landlordUid == request.auth.uid;
+    // Per-user app settings / preferences.
+    match /settings/{userId} {
+      allow read, write: if isOwner(userId);
+    }
 
-      // Positive likes queue queryable by the listing's landlord
+    // Listings published by landlords.
+    match /listings/{listingId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        request.resource.data.landlordUid == request.auth.uid;
+      allow update, delete: if isSignedIn() &&
+        resource.data.landlordUid == request.auth.uid;
+
+      // Positive likes queue queryable by the listing's landlord.
       match /likes/{studentUid} {
-        allow create: if isOwner(studentUid);
-        allow read: if isAuthenticated() && (
-          isOwner(studentUid) || 
+        allow create, delete: if isOwner(studentUid);
+        allow read: if isOwner(studentUid) || (
+          isSignedIn() &&
           get(/databases/$(database)/documents/listings/$(listingId)).data.landlordUid == request.auth.uid
         );
       }
     }
 
-    // Bilateral Matches
+    // Bilateral matches.
     match /matches/{matchId} {
-      // Accessible only to the matched Student and Landlord
-      allow read: if isAuthenticated() && (
-        resource.data.studentUid == request.auth.uid ||
-        resource.data.landlordUid == request.auth.uid
-      );
+      allow read: if isParticipant(resource.data);
+      allow create: if isParticipant(request.resource.data) &&
+        request.resource.data.studentUid != request.resource.data.landlordUid;
+      allow update: if isParticipant(resource.data) &&
+        request.resource.data.studentUid == resource.data.studentUid &&
+        request.resource.data.landlordUid == resource.data.landlordUid;
+      allow delete: if false;
 
-      // Match creation requires reciprocal right-swipe
-      allow create: if isAuthenticated() && (
-        request.resource.data.studentUid == request.auth.uid ||
-        request.resource.data.landlordUid == request.auth.uid
-      );
-
-      allow update: if isAuthenticated() && (
-        resource.data.studentUid == request.auth.uid ||
-        resource.data.landlordUid == request.auth.uid
-      );
-
-      // Real-time 1-on-1 Messages
+      // Real-time 1-on-1 messages.
       match /messages/{messageId} {
-        allow read: if isAuthenticated() && (
-          get(/databases/$(database)/documents/matches/$(matchId)).data.studentUid == request.auth.uid ||
-          get(/databases/$(database)/documents/matches/$(matchId)).data.landlordUid == request.auth.uid
-        );
-
-        // Security check for 24h First Move: student must initiate if messagesCount == 0
-        allow create: if isAuthenticated() && (
-          request.resource.data.senderUid == request.auth.uid
-        );
+        allow read: if isMatchParticipant(matchId);
+        allow create: if isMatchParticipant(matchId) &&
+          request.resource.data.senderUid == request.auth.uid;
+        // Only the structured viewing proposal fields may be updated after
+        // creation. Message text and sender identity are immutable.
+        allow update: if isMatchParticipant(matchId) &&
+          request.resource.data.senderUid == resource.data.senderUid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['proposalStatus', 'viewingDate']);
+        allow delete: if false;
       }
     }
   }

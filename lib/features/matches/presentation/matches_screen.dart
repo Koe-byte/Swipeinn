@@ -14,7 +14,7 @@ class MatchesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final matches = ref.watch(matchesProvider);
-    final user = ref.watch(authStateProvider).value;
+    final user = ref.watch(authStateProvider).valueOrNull;
     final listings = ref.watch(listingsProvider);
 
     final activeMatches = matches.where((m) => m.status == MatchStatus.active && !m.isExpired).toList();

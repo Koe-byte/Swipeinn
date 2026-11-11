@@ -4,8 +4,17 @@ import 'package:rently/features/auth/domain/user_model.dart';
 import 'package:rently/features/auth/presentation/auth_provider.dart';
 import 'package:rently/features/matches/domain/match_model.dart';
 import 'package:rently/features/matches/presentation/matches_provider.dart';
+import 'package:rently/core/services/database_service.dart';
 
 void main() {
+  setUp(() {
+    DatabaseService.instance.resetForTesting();
+  });
+
+  tearDown(() {
+    DatabaseService.instance.resetForTesting();
+  });
+
   group('Database Auth and Chat verification', () {
     test('Auth user must be persisted in database and retrievable by UID', () async {
       final container = ProviderContainer();

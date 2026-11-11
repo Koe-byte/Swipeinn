@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rently/features/auth/domain/user_model.dart';
 import 'package:rently/features/auth/presentation/auth_provider.dart';
+import 'package:rently/features/auth/presentation/complete_profile_screen.dart';
 import 'package:rently/features/auth/presentation/demographics/student_demographics_screen.dart';
 import 'package:rently/features/navigation/presentation/main_navigation_shell.dart';
 import 'package:rently/core/services/database_service.dart';
@@ -184,7 +185,7 @@ void main() {
   });
 
   group('MainNavigationShell & OAuth UI TDD Slice 3', () {
-    testWidgets('OnboardingScreen renders Google and Facebook login buttons and tapping Google signs in student', (tester) async {
+    testWidgets('Landing opens account creation and Google sign-in routes new student to demographics', (tester) async {
       final container = ProviderContainer();
 
       await tester.pumpWidget(
@@ -197,17 +198,59 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Verify Google and Facebook buttons exist
+      // Signed-out users see the landing screen, not a role picker.
+      expect(find.text('Create an account'), findsOneWidget);
+      await tester.tap(find.text('Create an account'));
+      await tester.pumpAndSettle();
+
+      // Verify Google and Facebook buttons exist on the sign-up screen.
       expect(find.text('Continue with Google'), findsOneWidget);
       expect(find.text('Continue with Facebook'), findsOneWidget);
 
       // Tap Continue with Google
+      await tester.ensureVisible(find.text('Continue with Google'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Continue with Google'));
       await tester.pumpAndSettle();
 
       // Student has not completed onboarding yet, so MainNavigationShell should show StudentDemographicsScreen!
       expect(find.byType(StudentDemographicsScreen), findsOneWidget);
       expect(find.text('How many are looking for a place?'), findsOneWidget);
+    });
+
+    testWidgets('A valid session without a profile is routed to CompleteProfileScreen', (tester) async {
+      final container = ProviderContainer();
+      container.read(authStateProvider.notifier).state = AsyncValue.error(
+        const ProfileSetupRequired(
+          uid: 'firebase-uid-123',
+          email: 'new.student@ust.edu.ph',
+          displayName: 'New Student',
+        ),
+        StackTrace.current,
+      );
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: MainNavigationShell(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CompleteProfileScreen), findsOneWidget);
+      expect(find.textContaining('new.student@ust.edu.ph'), findsOneWidget);
+
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+
+      final user = container.read(authStateProvider).value;
+      expect(user, isNotNull);
+      expect(user!.uid, 'firebase-uid-123');
+      expect(user.role, UserRole.student);
+      expect(user.hasCompletedOnboarding, isFalse);
+      expect(find.byType(StudentDemographicsScreen), findsOneWidget);
     });
 
     testWidgets('Completed student directly views StudentProfileScreen and sees Pax, Gender, and House Rules', (tester) async {
