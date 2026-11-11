@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "rently-ph"
-  }
+  },
+  "targets": {
+    "rently-ph": {
+      "hosting": {
+        "swipeinn": [
+          "swipeinn"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

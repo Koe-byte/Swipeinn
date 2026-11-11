@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Rently Firestore security model
+// Swipeinn Firestore security model (demo-era; replaced in Phase 2)
 // ---------------------------------------------------------------------------
 // Every document is owned by the authenticated Firebase Auth UID.
 // The app must write users/{auth.uid}, matches/{id} where auth.uid is a

@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:rently/features/auth/domain/user_model.dart';
-import 'package:rently/features/auth/presentation/auth_provider.dart';
-import 'package:rently/features/matches/domain/match_model.dart';
-import 'package:rently/features/matches/presentation/matches_provider.dart';
-import 'package:rently/core/services/database_service.dart';
+import 'package:swipeinn/features/auth/domain/user_model.dart';
+import 'package:swipeinn/features/auth/presentation/auth_provider.dart';
+import 'package:swipeinn/features/matches/domain/match_model.dart';
+import 'package:swipeinn/features/matches/presentation/matches_provider.dart';
+import 'package:swipeinn/core/services/database_service.dart';
 
 void main() {
   setUp(() {

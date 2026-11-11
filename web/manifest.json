@@ -1,11 +1,11 @@
 {
-    "name": "rently",
-    "short_name": "rently",
+    "name": "Swipeinn",
+    "short_name": "Swipeinn",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#111827",
+    "theme_color": "#FFB800",
+    "description": "Swipe. Match. Move in. A bilateral rental discovery app.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

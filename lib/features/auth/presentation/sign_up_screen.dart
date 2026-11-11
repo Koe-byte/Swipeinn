@@ -94,7 +94,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Join Rently',
+                'Join Swipeinn',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.w800,

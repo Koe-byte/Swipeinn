@@ -22,18 +22,18 @@ void main() async {
 
   runApp(
     const ProviderScope(
-      child: RentlyApp(),
+      child: SwipeinnApp(),
     ),
   );
 }
 
-class RentlyApp extends StatelessWidget {
-  const RentlyApp({Key? key}) : super(key: key);
+class SwipeinnApp extends StatelessWidget {
+  const SwipeinnApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Rently',
+      title: 'Swipeinn',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       home: const MainNavigationShell(),

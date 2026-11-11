@@ -80,7 +80,7 @@ class _AuthLandingScreenState extends ConsumerState<AuthLandingScreen> {
               ),
               const SizedBox(height: 22),
               const Text(
-                'RENTLY',
+                'SWIPEINN',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 34,

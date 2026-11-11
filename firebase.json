@@ -2,5 +2,45 @@
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "hosting": [
+    {
+      "target": "swipeinn",
+      "public": "build/web",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    }
+  ],
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "rently-ph",
+          "appId": "1:58561207998:android:fa4e975bd1433c0a8388ef",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "rently-ph",
+          "configurations": {
+            "android": "1:58561207998:android:fa4e975bd1433c0a8388ef",
+            "web": "1:58561207998:web:524440ca2bea980e8388ef"
+          }
+        }
+      }
+    }
   }
 }

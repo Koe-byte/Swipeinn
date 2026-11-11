@@ -15,7 +15,7 @@ final authStateProvider = StateNotifierProvider<AuthNotifier, AsyncValue<UserMod
   return AuthNotifier(repo);
 });
 
-/// Thrown when Firebase Auth has a valid user but no Rently profile document.
+/// Thrown when Firebase Auth has a valid user but no Swipeinn profile document.
 /// The auth gate turns this into the "complete your profile" screen.
 class ProfileSetupRequired implements Exception {
   final String uid;
@@ -198,7 +198,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserModel?>> {
       final fbUser = credential.user;
       if (fbUser == null) throw StateError('Account creation returned no user.');
 
-      final name = displayName.trim().isEmpty ? 'Rently User' : displayName.trim();
+      final name = displayName.trim().isEmpty ? 'Swipeinn User' : displayName.trim();
       await fbUser.updateDisplayName(name);
 
       final profile = _buildProfile(
@@ -395,7 +395,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserModel?>> {
     final profile = _buildProfile(
       uid: fbUser.uid,
       email: fbUser.email ?? '',
-      displayName: fbUser.displayName ?? 'Rently User',
+      displayName: fbUser.displayName ?? 'Swipeinn User',
       role: role,
       authProvider: providerName,
       photoUrl: fbUser.photoURL ?? '',
@@ -433,7 +433,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserModel?>> {
       final profile = _buildProfile(
         uid: pending.uid,
         email: pending.email.isEmpty ? (fbUser?.email ?? '') : pending.email,
-        displayName: name.isEmpty ? 'Rently User' : name,
+        displayName: name.isEmpty ? 'Swipeinn User' : name,
         role: role,
         authProvider: provider,
         photoUrl: fbUser?.photoURL ?? '',
@@ -580,7 +580,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserModel?>> {
       final user = _buildProfile(
         uid: uid,
         email: email.trim(),
-        displayName: displayName.trim().isEmpty ? 'Rently User' : displayName.trim(),
+        displayName: displayName.trim().isEmpty ? 'Swipeinn User' : displayName.trim(),
         role: role,
         authProvider: authProvider,
         photoUrl: photoUrl ?? '',

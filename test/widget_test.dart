@@ -8,15 +8,15 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:rently/main.dart';
+import 'package:swipeinn/main.dart';
 
 void main() {
-  testWidgets('RentlyApp smoke test', (WidgetTester tester) async {
+  testWidgets('SwipeinnApp smoke test', (WidgetTester tester) async {
     await tester.pumpWidget(
       const ProviderScope(
-        child: RentlyApp(),
+        child: SwipeinnApp(),
       ),
     );
-    expect(find.byType(RentlyApp), findsOneWidget);
+    expect(find.byType(SwipeinnApp), findsOneWidget);
   });
 }

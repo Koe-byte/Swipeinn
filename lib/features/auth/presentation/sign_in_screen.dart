@@ -138,7 +138,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('New to Rently?', style: TextStyle(color: AppTheme.textSecondary)),
+                  const Text('New to Swipeinn?', style: TextStyle(color: AppTheme.textSecondary)),
                   TextButton(
                     onPressed: isLoading ? null : widget.onCreateAccount,
                     child: const Text('Create account'),

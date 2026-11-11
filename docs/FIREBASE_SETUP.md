@@ -1,92 +1,142 @@
-# Firebase setup for Rently
+# Firebase setup for Swipeinn
 
-Project: `rently-ph` (see `.firebaserc` and `lib/firebase_options.dart`).
+Swipeinn is the app-facing brand. The Firebase project ID remains `rently-ph`
+for continuity; see `.firebaserc` and `lib/firebase_options.dart`.
 
-## 1. Enable Authentication providers
+## Project resources
+
+| Resource | Value |
+| --- | --- |
+| Firebase project | `rently-ph` |
+| Project display name | `Swipeinn` |
+| Firestore database | `(default)`, `asia-southeast1` |
+| Web app ID | `1:58561207998:web:524440ca2bea980e8388ef` |
+| Android app ID | `1:58561207998:android:fa4e975bd1433c0a8388ef` |
+| Android package | `com.swipeinn.app` |
+| Hosting site | `swipeinn` → `https://swipeinn.web.app` |
+
+## 1. Authentication
 
 In the [Firebase Console](https://console.firebase.google.com/project/rently-ph/authentication/providers):
 
-1. **Email/Password** — enable it. This is required for:
-   - normal email/password sign-up and sign-in
-   - the fixed demo accounts below
-2. **Google** — enable it for Google sign-in.
-3. **Facebook** — enable it for Facebook sign-in (only `public_profile` is requested).
+1. Enable **Email/Password**. This is the only sign-in method Swipeinn supports.
+2. Disable Google, Facebook, phone, and anonymous sign-in. The current UI still
+   contains legacy Google/Facebook buttons; they are removed in Phase 1.
 
-Under **Authentication → Settings → Authorized domains**, add every domain used
-for local/staging web builds (for example `localhost`, your LAN IP, and the
-production host).
+Under **Authentication → Settings → Authorized domains**, keep:
 
-## 2. Deploy Firestore rules
+- `localhost`
+- `rently-ph.firebaseapp.com`
+- `rently-ph.web.app`
+- `swipeinn.web.app`
 
-The rules in `firestore.rules` make `users/{auth.uid}` the source of truth and
-scope matches/messages to their participants.
+The custom hosting site `swipeinn.web.app` was added through the Identity
+Toolkit Admin API on 2026-11-11. If a new hosting site is created later, add it
+to this list or web sign-in will fail with `auth/unauthorized-domain`.
+
+Email verification and password reset use Firebase's default email templates.
+Customize the sender name and templates in the Console before launch.
+
+## 2. Firestore
+
+Deploy rules and indexes:
 
 ```powershell
-npm install -g firebase-tools
-firebase login
 firebase use rently-ph
 firebase deploy --only firestore:rules
-```
-
-Or without a global install:
-
-```powershell
-npx firebase-tools login
-npx firebase-tools use rently-ph
-npx firebase-tools deploy --only firestore:rules
-```
-
-Indexes are not required for the current queries, but the config is included:
-
-```powershell
 firebase deploy --only firestore:indexes
 ```
 
-## 3. Demo accounts
+The rules in `firestore.rules` are still the original demo-era rules. They are
+replaced in Phase 2 with the real listings, likes, matches, and messages model.
+Do not treat the current rules as production-ready.
 
-The debug demo buttons use these fixed accounts:
+## 3. Storage (photo uploads)
 
-| Role   | Email                  | Password        |
-| ------ | ---------------------- | --------------- |
-| Student | `student.demo@rently.ph` | `RentlyDemo123!` |
-| Host    | `host.demo@rently.ph`    | `RentlyDemo123!` |
+Listing photos are uploaded to:
 
-Once Email/Password is enabled, tap **Student demo** / **Host demo** on the
-signed-out landing screen (debug builds only). On first use the app creates the
-Firebase Auth account and its `users/{uid}` profile automatically. Subsequent
-sign-ins reuse the same uid and profile.
+```text
+users/{uid}/listings/{listingId}/{fileName}
+```
 
-To create them manually instead, use **Authentication → Users → Add user** with
-the same email/password, then sign in through the demo button once so the app
-writes the profile document.
+`storage.rules` limits writes to the uploader's own folder, images only, and
+5 MB per file.
 
-### Demo account troubleshooting
+**Current blocker:** Firebase Storage is not initialized on `rently-ph`, and
+Cloud Billing is disabled for the project (verified 2026-11-12). There are no
+Storage buckets. `firebase deploy --only storage` fails with:
 
-The app never substitutes a local identity when Firebase Auth is configured.
-If a demo button shows:
+> Firebase Storage has not been set up on project 'rently-ph'.
 
-> The demo account `host.demo@rently.ph` exists with a different password.
-> Reset it to `RentlyDemo123!` in Firebase Console > Authentication > Users,
-> or delete the account and try again.
+To enable uploads:
 
-then the Auth user exists with a different password or provider. Open
-[Authentication → Users](https://console.firebase.google.com/project/rently-ph/authentication/users),
-delete `host.demo@rently.ph`, and tap **Host demo** again. Deleting is safer
-than guessing the old password.
+1. Open [Firebase Console → Storage](https://console.firebase.google.com/project/rently-ph/storage).
+2. Click **Get Started** and choose the same region as Firestore
+   (`asia-southeast1`).
+3. Confirm the billing plan requirements shown by the Console.
+4. Run `firebase deploy --only storage`.
 
-If Email/Password is disabled, the demo buttons surface an
-`operation-not-allowed` error instead of silently falling back to a mock
-identity. Enable the provider first.
+Until Storage is enabled, listing creation falls back to photo URLs. Do not
+ship a photo-upload UI that silently fails; hide the upload control or label it
+as unavailable while this blocker is open.
 
-## 4. What the app writes
+## 4. Hosting
 
-- `users/{auth.uid}` — profile, role, onboarding state (owner-only)
-- `matches/{matchId}` — bilateral match (participants only)
-- `matches/{matchId}/messages/{messageId}` — chat (participants only; message
-  text and sender are immutable after creation)
-- `settings/{auth.uid}` — per-user preferences (owner-only)
+The web build is served from the `swipeinn` hosting target:
 
-Synthetic IDs such as `student_sample_1` are only used by the local/debug
-fallback. Real accounts always use the Firebase Auth uid. The app also repairs
-a missing `users/{uid}` document automatically: if the profile is still in the
-durable local cache, the next sign-in re-uploads it to Firestore.
+```powershell
+flutter build web --release
+firebase deploy --only hosting:swipeinn
+```
+
+`https://swipeinn.web.app` currently serves a branded placeholder. The real
+Flutter build is deployed in Phase 5 after demo authentication and seeded data
+are removed.
+
+The old `https://rently-ph.web.app` site remains available for a future redirect.
+
+## 5. Android
+
+The Android app is registered as **Swipeinn Android** with package
+`com.swipeinn.app`. Its configuration is stored in
+`android/app/google-services.json`, and the Google Services Gradle plugin is
+already applied.
+
+```powershell
+flutter build apk --debug --target-platform android-x64
+flutter install
+```
+
+`android/gradle.properties` caps Gradle at a 1.5 GB heap and two workers
+because the development machine has 6 GB RAM. Raise those limits only on a
+machine with more memory. The x86_64 target matches the local emulator; use
+the default multi-ABI build for a physical device or release APK.
+
+Release signing is not configured yet. A signed APK is part of the delivery
+milestone after Phase 5.
+
+## 6. Demo data and accounts
+
+There are no supported demo accounts. The fixed `student.demo@rently.ph` and
+`host.demo@rently.ph` users, the `RentlyDemo123!` password, and the demo buttons
+on the landing screen are removed in Phase 1.
+
+Seeded Firestore listings, likes, matches, and messages must be deleted before
+real use. Back up the data first, then clear the collections in the Console or
+with the Firestore Admin API. The Firebase CLI can delete documents but cannot
+delete Auth users; remove those in **Authentication → Users** or with the Admin
+SDK.
+
+## 7. Local verification
+
+```powershell
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d chrome
+flutter run -d emulator-5554
+```
+
+If web sign-in fails immediately, check the browser console for
+`auth/unauthorized-domain` and confirm the current host is listed in
+**Authentication → Settings → Authorized domains**.

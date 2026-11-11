@@ -1,4 +1,4 @@
-package com.example.rently
+package com.swipeinn.app
 
 import io.flutter.embedding.android.FlutterActivity
 

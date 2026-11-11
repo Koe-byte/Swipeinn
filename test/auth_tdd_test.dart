@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:rently/features/auth/domain/user_model.dart';
-import 'package:rently/features/auth/presentation/auth_provider.dart';
-import 'package:rently/features/auth/presentation/complete_profile_screen.dart';
-import 'package:rently/features/auth/presentation/demographics/student_demographics_screen.dart';
-import 'package:rently/features/navigation/presentation/main_navigation_shell.dart';
-import 'package:rently/core/services/database_service.dart';
+import 'package:swipeinn/features/auth/domain/user_model.dart';
+import 'package:swipeinn/features/auth/presentation/auth_provider.dart';
+import 'package:swipeinn/features/auth/presentation/complete_profile_screen.dart';
+import 'package:swipeinn/features/auth/presentation/demographics/student_demographics_screen.dart';
+import 'package:swipeinn/features/navigation/presentation/main_navigation_shell.dart';
+import 'package:swipeinn/core/services/database_service.dart';
 
 void main() {
   setUp(() {

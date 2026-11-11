@@ -2,9 +2,10 @@ import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
 
-/// Default [FirebaseOptions] for use with your Firebase apps.
+/// Default [FirebaseOptions] for use with the Swipeinn Firebase project.
 ///
-/// Generated configuration supporting Web, Android, and iOS for Rently.
+/// Generated configuration for Web and Android. The Firebase project ID remains
+/// `rently-ph`; only the app-facing brand is Swipeinn.
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
@@ -13,10 +14,11 @@ class DefaultFirebaseOptions {
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return android;
-      case TargetPlatform.iOS:
-        return ios;
       default:
-        return web;
+        throw UnsupportedError(
+          'Swipeinn is configured for web and Android only. '
+          'Register an iOS app before building for iOS.',
+        );
     }
   }
 
@@ -31,19 +33,10 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyD-GpYMJ5nbDIAG--tiLR6hKSEzgPtpwh8',
-    appId: '1:58561207998:android:524440ca2bea980e8388ef',
+    apiKey: 'AIzaSyAXCuUDYGNSteYC30v4XWeMt0Ii0_U8kY4',
+    appId: '1:58561207998:android:fa4e975bd1433c0a8388ef',
     messagingSenderId: '58561207998',
     projectId: 'rently-ph',
     storageBucket: 'rently-ph.firebasestorage.app',
-  );
-
-  static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyD-GpYMJ5nbDIAG--tiLR6hKSEzgPtpwh8',
-    appId: '1:58561207998:ios:524440ca2bea980e8388ef',
-    messagingSenderId: '58561207998',
-    projectId: 'rently-ph',
-    storageBucket: 'rently-ph.firebasestorage.app',
-    iosBundleId: 'com.example.rently',
   );
 }

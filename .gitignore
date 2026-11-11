@@ -25,6 +25,15 @@ graphify-out/
 PRD-HARDENED-MVP.md
 GLOSSARY.md
 
+# Local build / tool caches
+.firebase/
+android/.kotlin/
+
+# Signing secrets
+android/key.properties
+*.jks
+*.keystore
+
 # Crash logs & system dumps
 *.log
 hs_err_pid*
