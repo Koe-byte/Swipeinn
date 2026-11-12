@@ -12,7 +12,7 @@ The app is being migrated from the original student-only Rently demo. Demo authe
 
 ## Stack
 
-- Flutter 3.47 / Dart 3.13
+- Flutter 3.47.9 (pinned) / Dart 3.13.7 — see [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md)
 - Firebase Auth, Cloud Firestore, Firebase Storage
 - Riverpod
 
