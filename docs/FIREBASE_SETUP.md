@@ -51,9 +51,37 @@ firebase deploy --only firestore:rules
 firebase deploy --only firestore:indexes
 ```
 
-The rules in `firestore.rules` are still the original demo-era rules. They are
-replaced in Phase 2 with the real listings, likes, matches, and messages model.
-Do not treat the current rules as production-ready.
+The Phase 2 data model lives under these collections:
+
+```text
+users/{uid}
+listings/{listingId}
+listings/{listingId}/likes/{requesterUid}
+matches/{listingId_requesterUid}
+matches/{matchId}/messages/{messageId}
+```
+
+- `listings.ownerUid` is the publisher. Any verified account can publish.
+- A like document ID is the requester's UID, so one account can express interest
+  once per place. `status` moves from `pending` to `approved`.
+- `matches.participantUids` holds the owner and requester UIDs, which lets each
+  side fetch its conversations with one `array-contains` query.
+- `listingTitle` is copied onto the match so both sides can render it without
+  reading a listing they may not own.
+
+`firestore.rules` enforces verified-email writes, owner-only listing and like
+queue access, owner-only match creation from an existing like, and
+participant-only messages. Only the message proposal fields may change after a
+message is created.
+
+No composite indexes are required: filtered collections are sorted in the app
+instead of by Firestore. `firestore.indexes.json` stays empty unless a future
+query adds an `orderBy` or a second filter.
+
+The rules were exercised against the Firestore emulator with two verified
+accounts: 24 checks cover allowed and denied listing, like, match, message, and
+proposal operations (`rules_test.mjs` in the local emulator workspace; the
+script is not shipped with the app).
 
 ## 3. Storage (photo uploads)
 
@@ -93,9 +121,10 @@ flutter build web --release
 firebase deploy --only hosting:swipeinn
 ```
 
-`https://swipeinn.web.app` serves the Phase 1 Flutter build: real email/password
-auth, the verification gate, and the two-step preferences onboarding. Deploy
-again after each phase that changes user-facing behavior.
+`https://swipeinn.web.app` serves the Phase 2 Flutter build: real email/password
+auth, the verification gate, two-step preferences onboarding, and Firestore
+listings, likes, matches, and messages. Deploy again after each phase that
+changes user-facing behavior.
 
 The old `https://rently-ph.web.app` site remains available for a future redirect.
 
@@ -128,11 +157,12 @@ There are no supported demo accounts. The fixed `student.demo@rently.ph` and
 on the landing screen were removed in Phase 1. Create a real account through
 the app.
 
-Seeded Firestore listings, likes, matches, and messages must be deleted before
-real use. Back up the data first, then clear the collections in the Console or
-with the Firestore Admin API. The Firebase CLI can delete documents but cannot
-delete Auth users; remove those in **Authentication → Users** or with the Admin
-SDK.
+Seeded Firestore data must be deleted before real use. The collections to clear
+are `listings` (including each listing's `likes` subcollection), `matches`
+(including `messages`), and any leftover demo `users` or `settings` documents.
+Back up the data first, then clear the collections in the Console or with the
+Firestore Admin API. The Firebase CLI can delete documents but cannot delete
+Auth users; remove those in **Authentication → Users** or with the Admin SDK.
 
 ### Verified owner badge
 

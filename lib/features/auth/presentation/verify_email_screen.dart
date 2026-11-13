@@ -77,7 +77,9 @@ class VerifyEmailScreen extends ConsumerWidget {
                     AuthInfoBanner(message: state.infoMessage!),
                   ElevatedButton(
                     key: const Key('verify_refresh'),
-                    onPressed: state.isSubmitting ? null : notifier.refreshVerification,
+                    onPressed: state.isSubmitting
+                        ? null
+                        : notifier.refreshVerification,
                     child: state.isSubmitting
                         ? const SizedBox(
                             width: 20,
@@ -91,8 +93,9 @@ class VerifyEmailScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton(
-                    onPressed:
-                        state.isSubmitting ? null : notifier.resendVerificationEmail,
+                    onPressed: state.isSubmitting
+                        ? null
+                        : notifier.resendVerificationEmail,
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       foregroundColor: AppTheme.navyDark,
@@ -107,7 +110,8 @@ class VerifyEmailScreen extends ConsumerWidget {
                   const Text(
                     'No email after a minute? Check the spam folder before resending.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                    style:
+                        TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                   ),
                 ],
               ),

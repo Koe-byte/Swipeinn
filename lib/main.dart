@@ -79,7 +79,8 @@ class _StartupFailureScreen extends StatelessWidget {
               Text(
                 details,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                style: const TextStyle(
+                    fontSize: 11, color: AppTheme.textSecondary),
               ),
             ],
           ),

@@ -50,7 +50,8 @@ class AuthInfoBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.check_circle_outline, color: Colors.green.shade700, size: 20),
+          Icon(Icons.check_circle_outline,
+              color: Colors.green.shade700, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

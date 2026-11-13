@@ -1,39 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/listing_model.dart';
+import '../presentation/listings_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_provider.dart';
 import 'landlord_review_queue_screen.dart';
-
-// State of all active listings
-final listingsProvider =
-    StateNotifierProvider<ListingsNotifier, List<ListingModel>>((ref) {
-  return ListingsNotifier();
-});
-
-class ListingsNotifier extends StateNotifier<List<ListingModel>> {
-  ListingsNotifier() : super([]);
-
-  void addListing(ListingModel listing) {
-    state = [listing, ...state];
-  }
-
-  void toggleStatus(String listingId, ListingStatus newStatus) {
-    state = state.map((item) {
-      if (item.id == listingId) {
-        return item.copyWith(status: newStatus);
-      }
-      return item;
-    }).toList();
-  }
-}
 
 class LandlordStudioScreen extends ConsumerWidget {
   const LandlordStudioScreen({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final listings = ref.watch(listingsProvider);
+    final listingsAsync = ref.watch(myListingsProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -46,129 +24,142 @@ class LandlordStudioScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: listings.isEmpty
-          ? const Center(child: Text('No listings published yet.'))
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: listings.length,
-              itemBuilder: (context, index) {
-                final listing = listings[index];
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        height: 140,
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          image: listing.photos.isNotEmpty
-                              ? DecorationImage(
-                                  image: NetworkImage(listing.photos.first),
-                                  fit: BoxFit.cover,
-                                )
-                              : null,
-                        ),
-                        child: Align(
-                          alignment: Alignment.topRight,
-                          child: Container(
-                            margin: const EdgeInsets.all(8),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: listing.status == ListingStatus.available
-                                  ? AppTheme.likeGreen
-                                  : Colors.orange,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              listing.status.name.toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11,
+      body: listingsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(
+              'Could not load your listings. Pull to retry from Discover.\n$error',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppTheme.textSecondary),
+            ),
+          ),
+        ),
+        data: (listings) => listings.isEmpty
+            ? const Center(child: Text('No listings published yet.'))
+            : ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: listings.length,
+                itemBuilder: (context, index) {
+                  final listing = listings[index];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          height: 140,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade200,
+                            image: listing.photos.isNotEmpty
+                                ? DecorationImage(
+                                    image: NetworkImage(listing.photos.first),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null,
+                          ),
+                          child: Align(
+                            alignment: Alignment.topRight,
+                            child: Container(
+                              margin: const EdgeInsets.all(8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: listing.status == ListingStatus.available
+                                    ? AppTheme.likeGreen
+                                    : Colors.orange,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                listing.status.name.toUpperCase(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              listing.title,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 18),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '₱${listing.monthlyRent.toStringAsFixed(0)} / month • ${listing.roomType.name.toUpperCase()}',
-                              style: const TextStyle(
-                                color: AppTheme.primaryDarkAmber,
-                                fontWeight: FontWeight.w700,
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                listing.title,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 18),
                               ),
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppTheme.navyDark,
-                                      foregroundColor: Colors.white,
+                              const SizedBox(height: 4),
+                              Text(
+                                '₱${listing.monthlyRent.toStringAsFixed(0)} / month • ${listing.propertyType.label.toUpperCase()}',
+                                style: const TextStyle(
+                                  color: AppTheme.primaryDarkAmber,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppTheme.navyDark,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      icon: const Icon(Icons.people_alt,
+                                          size: 18),
+                                      label: const Text('Review Queue'),
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                LandlordReviewQueueScreen(
+                                                    listing: listing),
+                                          ),
+                                        );
+                                      },
                                     ),
-                                    icon:
-                                        const Icon(Icons.people_alt, size: 18),
-                                    label: const Text('Review Queue'),
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              LandlordReviewQueueScreen(
-                                                  listing: listing),
-                                        ),
-                                      );
-                                    },
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                PopupMenuButton<ListingStatus>(
-                                  icon: const Icon(Icons.more_vert),
-                                  onSelected: (status) {
-                                    ref
-                                        .read(listingsProvider.notifier)
-                                        .toggleStatus(listing.id, status);
-                                  },
-                                  itemBuilder: (context) => [
-                                    const PopupMenuItem(
-                                      value: ListingStatus.available,
-                                      child: Text('Mark Available'),
-                                    ),
-                                    const PopupMenuItem(
-                                      value: ListingStatus.reserved,
-                                      child: Text('Mark Reserved'),
-                                    ),
-                                    const PopupMenuItem(
-                                      value: ListingStatus.full,
-                                      child: Text('Mark Full / Hide'),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ],
+                                  const SizedBox(width: 8),
+                                  PopupMenuButton<ListingStatus>(
+                                    icon: const Icon(Icons.more_vert),
+                                    onSelected: (status) {
+                                      ref
+                                          .read(listingsRepositoryProvider)
+                                          .updateStatus(listing.id, status);
+                                    },
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem(
+                                        value: ListingStatus.available,
+                                        child: Text('Mark Available'),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: ListingStatus.reserved,
+                                        child: Text('Mark Reserved'),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: ListingStatus.full,
+                                        child: Text('Mark Full / Hide'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+      ),
     );
   }
 
@@ -176,7 +167,7 @@ class LandlordStudioScreen extends ConsumerWidget {
     final titleController = TextEditingController();
     final descriptionController = TextEditingController();
     final rentController = TextEditingController();
-    RoomType selectedRoomType = RoomType.solo;
+    PropertyType selectedPropertyType = PropertyType.room;
 
     showModalBottomSheet(
       context: context,
@@ -253,19 +244,18 @@ class LandlordStudioScreen extends ConsumerWidget {
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
-                      children: RoomType.values.map((type) {
+                      children: PropertyType.values.map((type) {
                         return ChoiceChip(
-                          label: Text(type.name[0].toUpperCase() +
-                              type.name.substring(1)),
-                          selected: selectedRoomType == type,
+                          label: Text(type.label),
+                          selected: selectedPropertyType == type,
                           onSelected: (_) =>
-                              setSheetState(() => selectedRoomType = type),
+                              setSheetState(() => selectedPropertyType = type),
                         );
                       }).toList(),
                     ),
                     const SizedBox(height: 20),
                     ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         final title = titleController.text.trim();
                         if (title.isEmpty) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
@@ -274,20 +264,21 @@ class LandlordStudioScreen extends ConsumerWidget {
                           );
                           return;
                         }
+                        final uid = ref.read(authStateProvider).user?.uid;
+                        if (uid == null) return;
                         final rent =
                             double.tryParse(rentController.text.trim()) ??
                                 4000.0;
                         final description = descriptionController.text.trim();
                         final newListing = ListingModel(
                           id: 'listing_${DateTime.now().millisecondsSinceEpoch}',
-                          landlordUid: ref.read(authStateProvider).user?.uid ??
-                              'unknown',
+                          ownerUid: uid,
                           title: title,
                           description: description.isEmpty
                               ? 'Newly posted listing.'
                               : description,
                           monthlyRent: rent,
-                          roomType: selectedRoomType,
+                          propertyType: selectedPropertyType,
                           // No photo upload yet (Firebase Storage is unavailable),
                           // so the card shows its placeholder instead of a stock
                           // photo of a different unit.
@@ -298,14 +289,25 @@ class LandlordStudioScreen extends ConsumerWidget {
                           status: ListingStatus.available,
                           createdAt: DateTime.now(),
                         );
-                        ref
-                            .read(listingsProvider.notifier)
-                            .addListing(newListing);
-                        Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                              content: Text('"$title" is now in Discover.')),
-                        );
+                        try {
+                          await ref
+                              .read(listingsRepositoryProvider)
+                              .publish(newListing);
+                          if (!ctx.mounted) return;
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                                content: Text('"$title" is now in Discover.')),
+                          );
+                        } catch (error) {
+                          if (!ctx.mounted) return;
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                  'Could not publish this listing: $error'),
+                            ),
+                          );
+                        }
                       },
                       child: const Text('Publish Listing Card'),
                     ),

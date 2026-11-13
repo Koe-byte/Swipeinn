@@ -21,17 +21,26 @@ class DatabaseService {
   };
 
   // Subcollections: "matches/{matchId}/messages" -> docId -> data map
-  final Map<String, Map<String, Map<String, dynamic>>> _localSubcollections = {};
+  final Map<String, Map<String, Map<String, dynamic>>> _localSubcollections =
+      {};
 
   // Stream controllers for real-time reactivity
-  final Map<String, StreamController<Map<String, dynamic>?>> _docControllers = {};
-  final Map<String, StreamController<List<Map<String, dynamic>>>> _colControllers = {};
+  final Map<String, StreamController<Map<String, dynamic>?>> _docControllers =
+      {};
+  final Map<String, StreamController<List<Map<String, dynamic>>>>
+      _colControllers = {};
 
   // Collections mirrored to disk so profiles and onboarding state survive
   // logouts, browser reloads and Firestore permission-denied responses.
-  static const Set<String> _persistedCollections = {'users', 'settings', 'matches'};
+  static const Set<String> _persistedCollections = {
+    'users',
+    'settings',
+    'matches',
+    'listings',
+  };
   static const String _cacheKeyPrefix = 'database_cache_v2_';
-  static const String _subcollectionCacheKey = 'database_cache_v2_subcollections';
+  static const String _subcollectionCacheKey =
+      'database_cache_v2_subcollections';
 
   final LocalCacheStore _cacheStore = createLocalCacheStore();
   Future<void>? _cacheHydration;
@@ -59,7 +68,8 @@ class DatabaseService {
         decoded.forEach((docId, data) {
           if (data is Map) {
             // Never clobber a fresher in-memory write made before hydration.
-            store.putIfAbsent(docId.toString(), () => Map<String, dynamic>.from(data));
+            store.putIfAbsent(
+                docId.toString(), () => Map<String, dynamic>.from(data));
           }
         });
       }
@@ -70,10 +80,12 @@ class DatabaseService {
         if (decoded is Map) {
           decoded.forEach((path, docs) {
             if (docs is! Map) return;
-            final store = _localSubcollections.putIfAbsent(path.toString(), () => {});
+            final store =
+                _localSubcollections.putIfAbsent(path.toString(), () => {});
             docs.forEach((docId, data) {
               if (data is Map) {
-                store.putIfAbsent(docId.toString(), () => Map<String, dynamic>.from(data));
+                store.putIfAbsent(
+                    docId.toString(), () => Map<String, dynamic>.from(data));
               }
             });
           });
@@ -115,7 +127,8 @@ class DatabaseService {
           .write(_subcollectionCacheKey, jsonEncode(snapshot))
           .timeout(const Duration(seconds: 3));
     } catch (e) {
-      debugPrint('[DatabaseService] Local subcollection cache write skipped: $e');
+      debugPrint(
+          '[DatabaseService] Local subcollection cache write skipped: $e');
     }
   }
 
@@ -252,7 +265,8 @@ class DatabaseService {
           return resolved;
         }
       } catch (e) {
-        debugPrint('[DatabaseService] Cloud Firestore read failed, checking local store: $e');
+        debugPrint(
+            '[DatabaseService] Cloud Firestore read failed, checking local store: $e');
       }
     }
 
@@ -312,16 +326,50 @@ class DatabaseService {
     return _firestoreDocumentStream(fs, collection, docId);
   }
 
+  /// Streams a whole collection, optionally narrowed by one equality filter and
+  /// one array-contains filter. Results are unordered; repositories sort them so
+  /// the app does not need composite Firestore indexes.
+  Stream<List<Map<String, dynamic>>> streamCollection({
+    required String collection,
+    String? whereField,
+    Object? isEqualTo,
+    String? arrayContainsField,
+    Object? arrayContainsValue,
+    int? limit,
+  }) {
+    final fs = firestore;
+    if (fs == null) {
+      return _localCollectionStream(
+        collection,
+        whereField: whereField,
+        isEqualTo: isEqualTo,
+        arrayContainsField: arrayContainsField,
+        arrayContainsValue: arrayContainsValue,
+      );
+    }
+    return _firestoreCollectionStream(
+      fs,
+      collection,
+      whereField: whereField,
+      isEqualTo: isEqualTo,
+      arrayContainsField: arrayContainsField,
+      arrayContainsValue: arrayContainsValue,
+      limit: limit,
+    );
+  }
+
   Stream<Map<String, dynamic>?> _firestoreDocumentStream(
     FirebaseFirestore fs,
     String collection,
     String docId,
   ) async* {
     try {
-      await for (final snap in fs.collection(collection).doc(docId).snapshots()) {
+      await for (final snap
+          in fs.collection(collection).doc(docId).snapshots()) {
         final data = snap.data();
         if (data != null) {
-          final resolved = _preferNewest(data, _localCollections[collection]?[docId]);
+          final resolved =
+              _preferNewest(data, _localCollections[collection]?[docId]);
           _localCollections.putIfAbsent(collection, () => {})[docId] = resolved;
           unawaited(_persistCollection(collection));
           yield resolved;
@@ -330,14 +378,17 @@ class DatabaseService {
         }
       }
     } catch (e) {
-      debugPrint('[DatabaseService] Firestore document stream failed, using local store: $e');
+      debugPrint(
+          '[DatabaseService] Firestore document stream failed, using local store: $e');
       yield* _localDocumentStream(collection, docId);
     }
   }
 
-  Stream<Map<String, dynamic>?> _localDocumentStream(String collection, String docId) {
+  Stream<Map<String, dynamic>?> _localDocumentStream(
+      String collection, String docId) {
     final key = '$collection/$docId';
-    _docControllers.putIfAbsent(key, () => StreamController<Map<String, dynamic>?>.broadcast());
+    _docControllers.putIfAbsent(
+        key, () => StreamController<Map<String, dynamic>?>.broadcast());
     Future.microtask(() {
       final controller = _docControllers[key];
       if (controller != null && !controller.isClosed) {
@@ -345,6 +396,111 @@ class DatabaseService {
       }
     });
     return _docControllers[key]!.stream;
+  }
+
+  Stream<List<Map<String, dynamic>>> _firestoreCollectionStream(
+    FirebaseFirestore fs,
+    String collection, {
+    String? whereField,
+    Object? isEqualTo,
+    String? arrayContainsField,
+    Object? arrayContainsValue,
+    int? limit,
+  }) async* {
+    try {
+      Query<Map<String, dynamic>> query = fs.collection(collection);
+      if (whereField != null && isEqualTo != null) {
+        query = query.where(whereField, isEqualTo: isEqualTo);
+      }
+      if (arrayContainsField != null && arrayContainsValue != null) {
+        query = query.where(
+          arrayContainsField,
+          arrayContains: arrayContainsValue,
+        );
+      }
+      if (limit != null) query = query.limit(limit);
+
+      await for (final snap in query.snapshots()) {
+        final docs =
+            snap.docs.map((doc) => {...doc.data(), 'id': doc.id}).toList();
+        _localCollections.putIfAbsent(collection, () => {});
+        for (final doc in snap.docs) {
+          _localCollections[collection]![doc.id] = doc.data();
+        }
+        unawaited(_persistCollection(collection));
+        yield docs;
+      }
+    } catch (e) {
+      debugPrint(
+        '[DatabaseService] Firestore collection stream failed for '
+        '$collection, using local store: $e',
+      );
+      yield* _localCollectionStream(
+        collection,
+        whereField: whereField,
+        isEqualTo: isEqualTo,
+        arrayContainsField: arrayContainsField,
+        arrayContainsValue: arrayContainsValue,
+      );
+    }
+  }
+
+  List<Map<String, dynamic>> _localCollectionSnapshot(
+    String collection, {
+    String? whereField,
+    Object? isEqualTo,
+    String? arrayContainsField,
+    Object? arrayContainsValue,
+  }) {
+    final docs = _localCollections[collection] ?? const {};
+    return docs.values
+        .where((data) {
+          if (whereField != null &&
+              isEqualTo != null &&
+              data[whereField] != isEqualTo) {
+            return false;
+          }
+          if (arrayContainsField != null && arrayContainsValue != null) {
+            final values = data[arrayContainsField];
+            if (values is! Iterable || !values.contains(arrayContainsValue)) {
+              return false;
+            }
+          }
+          return true;
+        })
+        .map((data) => Map<String, dynamic>.from(data))
+        .toList();
+  }
+
+  Stream<List<Map<String, dynamic>>> _localCollectionStream(
+    String collection, {
+    String? whereField,
+    Object? isEqualTo,
+    String? arrayContainsField,
+    Object? arrayContainsValue,
+  }) {
+    final controller = _colControllers.putIfAbsent(
+      collection,
+      () => StreamController<List<Map<String, dynamic>>>.broadcast(),
+    );
+
+    // Every listener gets a snapshot on listen, then re-filters each write. The
+    // shared controller stays unfiltered because different screens query the
+    // same collection with different predicates.
+    return () async* {
+      List<Map<String, dynamic>> snapshot() => _localCollectionSnapshot(
+            collection,
+            whereField: whereField,
+            isEqualTo: isEqualTo,
+            arrayContainsField: arrayContainsField,
+            arrayContainsValue: arrayContainsValue,
+          );
+
+      yield snapshot();
+      await for (final _ in controller.stream) {
+        yield snapshot();
+      }
+    }();
   }
 
   // --- Subcollection Operations (e.g. matches/{matchId}/messages) ---
@@ -375,9 +531,42 @@ class DatabaseService {
             .set(data, SetOptions(merge: true))
             .timeout(const Duration(seconds: 3));
       } catch (e) {
-        debugPrint('[DatabaseService] Firestore subdocument write skipped/fallback: $e');
+        debugPrint(
+            '[DatabaseService] Firestore subdocument write skipped/fallback: $e');
       }
     }
+  }
+
+  /// Reads one subcollection document. Used to make "like" idempotent without
+  /// downloading the whole likes queue.
+  Future<Map<String, dynamic>?> getSubdocument({
+    required String parentCollection,
+    required String parentId,
+    required String subcollection,
+    required String docId,
+  }) async {
+    final path = '$parentCollection/$parentId/$subcollection';
+    final fs = firestore;
+    if (fs != null) {
+      try {
+        final snap = await fs
+            .collection(parentCollection)
+            .doc(parentId)
+            .collection(subcollection)
+            .doc(docId)
+            .get();
+        if (snap.exists && snap.data() != null) {
+          _localSubcollections.putIfAbsent(path, () => {})[docId] =
+              Map<String, dynamic>.from(snap.data()!);
+          unawaited(_persistSubcollections());
+          return Map<String, dynamic>.from(snap.data()!);
+        }
+      } catch (e) {
+        debugPrint('[DatabaseService] Firestore subdocument read failed: $e');
+      }
+    }
+    final local = _localSubcollections[path]?[docId];
+    return local == null ? null : Map<String, dynamic>.from(local);
   }
 
   Future<List<Map<String, dynamic>>> getSubcollection({
@@ -416,7 +605,8 @@ class DatabaseService {
   }) {
     final fs = firestore;
     if (fs == null) {
-      return _localSubcollectionStream(parentCollection, parentId, subcollection);
+      return _localSubcollectionStream(
+          parentCollection, parentId, subcollection);
     }
     return _firestoreSubcollectionStream(
       fs,
@@ -447,8 +637,10 @@ class DatabaseService {
         yield docs;
       }
     } catch (e) {
-      debugPrint('[DatabaseService] Firestore subcollection stream failed, using local store: $e');
-      yield* _localSubcollectionStream(parentCollection, parentId, subcollection);
+      debugPrint(
+          '[DatabaseService] Firestore subcollection stream failed, using local store: $e');
+      yield* _localSubcollectionStream(
+          parentCollection, parentId, subcollection);
     }
   }
 

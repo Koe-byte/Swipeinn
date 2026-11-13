@@ -28,16 +28,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     'Hi! Is this unit still available for an ocular visit this weekend?',
   ];
 
-  @override
-  Widget build(BuildContext context) {
-    final allMatches = ref.watch(matchesProvider);
-    final currentMatch = allMatches.firstWhere(
+  MatchModel _currentMatch() {
+    final matches = ref.read(matchesProvider).valueOrNull ?? const [];
+    return matches.firstWhere(
       (m) => m.id == widget.match.id,
       orElse: () => widget.match,
     );
-    final messages = ref.watch(messagesProvider(widget.match.id));
+  }
+
+  String? get _uid => ref.read(authStateProvider).user?.uid;
+
+  @override
+  Widget build(BuildContext context) {
+    final matchesAsync = ref.watch(matchesProvider);
+    final currentMatch =
+        (matchesAsync.valueOrNull ?? const <MatchModel>[]).firstWhere(
+      (m) => m.id == widget.match.id,
+      orElse: () => widget.match,
+    );
+    final messagesAsync = ref.watch(messagesProvider(widget.match.id));
+    final messages = messagesAsync.valueOrNull ?? const <MessageModel>[];
     final user = ref.watch(authStateProvider).user;
-    final isRequester = user != null && user.uid == currentMatch.studentUid;
+    final isRequester = user != null && user.uid == currentMatch.requesterUid;
     final isMatchActive =
         currentMatch.status == MatchStatus.active && !currentMatch.isExpired;
     final needsFirstMove = currentMatch.messagesCount == 0;
@@ -69,7 +81,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: Column(
         children: [
-          // First-move banner: the renter opens the conversation.
+          // First-move banner: the requester opens the conversation.
           if (needsFirstMove)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -127,16 +139,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         return _ViewingProposalBubble(
                           msg: msg,
                           isLandlord: !isRequester,
-                          onAccept: () {
-                            ref
-                                .read(
-                                    messagesProvider(widget.match.id).notifier)
-                                .updateProposalStatus(msg.id, 'accepted');
-                            ref
-                                .read(matchesProvider.notifier)
-                                .updateViewingStatus(widget.match.id,
-                                    ViewingStatus.confirmed, msg.viewingDate);
-                          },
+                          onAccept: () => _acceptProposal(msg),
                         );
                       }
 
@@ -171,7 +174,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ),
           ),
 
-          // Student Icebreaker Chips
+          // Requester icebreaker chips.
           if (isRequester && needsFirstMove)
             Container(
               height: 48,
@@ -242,8 +245,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     icon: const Icon(Icons.send, color: AppTheme.navyDark),
                     onPressed: isMatchActive && (!needsFirstMove || isRequester)
                         ? () {
-                            if (_messageController.text.trim().isNotEmpty) {
-                              _sendMessage(_messageController.text.trim());
+                            final text = _messageController.text.trim();
+                            if (text.isNotEmpty) {
+                              _sendMessage(text);
                               _messageController.clear();
                             }
                           }
@@ -258,57 +262,66 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  void _sendMessage(String text) {
-    final allMatches = ref.read(matchesProvider);
-    final currentMatch = allMatches.firstWhere(
-      (m) => m.id == widget.match.id,
-      orElse: () => widget.match,
-    );
-    final user = ref.read(authStateProvider).user;
-    final isRequester = user != null && user.uid == currentMatch.studentUid;
-    final senderUid =
-        isRequester ? currentMatch.studentUid : currentMatch.landlordUid;
+  Future<void> _sendMessage(String text) async {
+    final senderUid = _uid;
+    if (senderUid == null) return;
 
-    ref.read(messagesProvider(widget.match.id).notifier).sendMessage(
-          senderUid: senderUid,
-          text: text,
+    final now = DateTime.now();
+    final message = MessageModel(
+      id: 'msg_${now.microsecondsSinceEpoch}_$senderUid',
+      senderUid: senderUid,
+      text: text,
+      sentAt: now,
+    );
+
+    await ref.read(matchesRepositoryProvider).sendMessage(
+          match: _currentMatch(),
+          message: message,
         );
-    ref.read(matchesProvider.notifier).incrementMessageCount(widget.match.id);
   }
 
-  void _showScheduleViewingDialog(BuildContext context) {
-    final allMatches = ref.read(matchesProvider);
-    final currentMatch = allMatches.firstWhere(
-      (m) => m.id == widget.match.id,
-      orElse: () => widget.match,
-    );
-    final user = ref.read(authStateProvider).user;
-    final isRequester = user != null && user.uid == currentMatch.studentUid;
-    final senderUid =
-        isRequester ? currentMatch.studentUid : currentMatch.landlordUid;
+  Future<void> _acceptProposal(MessageModel msg) async {
+    await ref.read(matchesRepositoryProvider).updateProposal(
+          matchId: widget.match.id,
+          messageId: msg.id,
+          status: 'accepted',
+          viewingDate: msg.viewingDate,
+        );
+  }
 
-    DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
-
-    showDatePicker(
+  Future<void> _showScheduleViewingDialog(BuildContext context) async {
+    final pickedDate = await showDatePicker(
       context: context,
-      initialDate: selectedDate,
+      initialDate: DateTime.now().add(const Duration(days: 1)),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 30)),
-    ).then((pickedDate) {
-      if (pickedDate != null) {
-        ref.read(messagesProvider(widget.match.id).notifier).sendMessage(
-              senderUid: senderUid,
-              text: 'In-person inspection requested',
-              type: MessageType.viewingProposal,
-              viewingDate: pickedDate,
-            );
-        ref
-            .read(matchesProvider.notifier)
-            .incrementMessageCount(widget.match.id);
-        ref.read(matchesProvider.notifier).updateViewingStatus(
-            widget.match.id, ViewingStatus.proposed, pickedDate);
-      }
-    });
+    );
+    if (pickedDate == null) return;
+
+    final senderUid = _uid;
+    if (senderUid == null) return;
+
+    final match = _currentMatch();
+    final now = DateTime.now();
+    final message = MessageModel(
+      id: 'msg_${now.microsecondsSinceEpoch}_$senderUid',
+      senderUid: senderUid,
+      text: 'In-person inspection requested',
+      type: MessageType.viewingProposal,
+      viewingDate: pickedDate,
+      sentAt: now,
+    );
+
+    await ref.read(matchesRepositoryProvider).updateMatch(
+          match.copyWith(
+            viewingStatus: ViewingStatus.proposed,
+            viewingDate: pickedDate,
+          ),
+        );
+    await ref.read(matchesRepositoryProvider).sendMessage(
+          match: match,
+          message: message,
+        );
   }
 
   void _showSafetySheet(BuildContext context) {
@@ -334,10 +347,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     style: TextStyle(color: AppTheme.passRed)),
                 subtitle: const Text(
                     'Instantly closes this chat and prevents future card appearances.'),
-                onTap: () {
-                  ref
-                      .read(matchesProvider.notifier)
-                      .unmatchAndBlock(widget.match.id);
+                onTap: () async {
+                  await ref.read(matchesRepositoryProvider).updateMatch(
+                        _currentMatch().copyWith(status: MatchStatus.unmatched),
+                      );
+                  if (!context.mounted) return;
                   Navigator.pop(ctx);
                   Navigator.pop(context);
                 },

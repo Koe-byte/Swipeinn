@@ -63,7 +63,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -100,7 +101,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                   const SizedBox(height: 8),
                   const Text(
                     'One account lets you browse places and list your own.',
-                    style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
+                    style:
+                        TextStyle(color: AppTheme.textSecondary, height: 1.4),
                   ),
                   const SizedBox(height: 24),
                   if (authState.errorMessage != null)
@@ -124,7 +126,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     textInputAction: TextInputAction.next,
                     decoration: InputDecoration(
                       labelText: 'Email',
-                      helperText: 'We send a verification link to this address.',
+                      helperText:
+                          'We send a verification link to this address.',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -148,8 +151,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                               ? Icons.visibility_outlined
                               : Icons.visibility_off_outlined,
                         ),
-                        onPressed: () =>
-                            setState(() => _obscurePassword = !_obscurePassword),
+                        onPressed: () => setState(
+                            () => _obscurePassword = !_obscurePassword),
                       ),
                     ),
                   ),

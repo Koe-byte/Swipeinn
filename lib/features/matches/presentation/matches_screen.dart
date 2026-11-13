@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/match_model.dart';
 import 'matches_provider.dart';
-import '../../listings/presentation/landlord_studio_screen.dart';
 import '../../../core/theme/app_theme.dart';
 import 'chat_screen.dart';
 
@@ -11,22 +10,34 @@ class MatchesScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final matches = ref.watch(matchesProvider);
-    final listings = ref.watch(listingsProvider);
-
-    final activeMatches = matches
-        .where((m) => m.status == MatchStatus.active && !m.isExpired)
-        .toList();
-    final expiredMatches = matches
-        .where((m) => m.isExpired || m.status == MatchStatus.expired)
-        .toList();
+    final matchesAsync = ref.watch(matchesProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Matched Connections'),
       ),
-      body: matches.isEmpty
-          ? Center(
+      body: matchesAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(
+              'Could not load your matches: $error',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppTheme.textSecondary),
+            ),
+          ),
+        ),
+        data: (matches) {
+          final activeMatches = matches
+              .where((m) => m.status == MatchStatus.active && !m.isExpired)
+              .toList();
+          final closedMatches = matches
+              .where((m) => m.isExpired || m.status == MatchStatus.expired)
+              .toList();
+
+          if (matches.isEmpty) {
+            return Center(
               child: Padding(
                 padding: const EdgeInsets.all(32.0),
                 child: Column(
@@ -49,68 +60,64 @@ class MatchesScreen extends ConsumerWidget {
                   ],
                 ),
               ),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (activeMatches.isNotEmpty) ...[
-                  const Text(
-                    'Active Chats',
-                    style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.navyDark),
-                  ),
-                  const SizedBox(height: 8),
-                  ...activeMatches.map((m) {
-                    final listing = listings.firstWhere(
-                      (l) => l.id == m.listingId,
-                      orElse: () => listings.first,
-                    );
-                    return _MatchCard(
-                      match: m,
-                      listingTitle: listing.title,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ChatScreen(
-                                match: m, listingTitle: listing.title),
-                          ),
-                        );
-                      },
-                    );
-                  }).toList(),
-                ],
-                if (expiredMatches.isNotEmpty) ...[
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Expired Matches',
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 8),
-                  ...expiredMatches.map((m) {
-                    final listing = listings.firstWhere(
-                      (l) => l.id == m.listingId,
-                      orElse: () => listings.first,
-                    );
-                    return ListTile(
-                      tileColor: Colors.grey.shade100,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      leading: const Icon(Icons.timer_off_outlined,
-                          color: Colors.grey),
-                      title: Text(listing.title,
-                          style: const TextStyle(color: Colors.grey)),
-                      subtitle: const Text('This match is closed'),
-                    );
-                  }).toList(),
-                ],
+            );
+          }
+
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              if (activeMatches.isNotEmpty) ...[
+                const Text(
+                  'Active Chats',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.navyDark),
+                ),
+                const SizedBox(height: 8),
+                ...activeMatches.map((m) {
+                  return _MatchCard(
+                    match: m,
+                    listingTitle: m.displayTitle,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ChatScreen(
+                              match: m, listingTitle: m.displayTitle),
+                        ),
+                      );
+                    },
+                  );
+                }),
               ],
-            ),
+              if (closedMatches.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                const Text(
+                  'Closed Matches',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textSecondary),
+                ),
+                const SizedBox(height: 8),
+                ...closedMatches.map((m) {
+                  return ListTile(
+                    tileColor: Colors.grey.shade100,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    leading: const Icon(Icons.timer_off_outlined,
+                        color: Colors.grey),
+                    title: Text(m.displayTitle,
+                        style: const TextStyle(color: Colors.grey)),
+                    subtitle: const Text('This match is closed'),
+                  );
+                }),
+              ],
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -128,6 +135,12 @@ class _MatchCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final preview = match.messagesCount == 0
+        ? 'Waiting for the first message'
+        : (match.lastMessage.trim().isEmpty
+            ? 'Chat opened'
+            : match.lastMessage);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -172,16 +185,18 @@ class _MatchCard extends StatelessWidget {
                   color: AppTheme.primaryDarkAmber,
                 ),
                 const SizedBox(width: 4),
-                Text(
-                  match.messagesCount == 0
-                      ? 'Waiting for the first message'
-                      : 'Chat opened',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: match.messagesCount == 0
-                        ? AppTheme.primaryDarkAmber
-                        : AppTheme.likeGreen,
+                Expanded(
+                  child: Text(
+                    preview,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: match.messagesCount == 0
+                          ? AppTheme.primaryDarkAmber
+                          : AppTheme.likeGreen,
+                    ),
                   ),
                 ),
               ],

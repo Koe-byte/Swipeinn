@@ -4,9 +4,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:swipeinn/core/services/database_service.dart';
 import 'package:swipeinn/features/auth/domain/user_model.dart';
 import 'package:swipeinn/features/auth/presentation/auth_provider.dart';
+import 'package:swipeinn/features/listings/domain/listing_model.dart';
+import 'package:swipeinn/features/listings/presentation/listings_provider.dart';
+import 'package:swipeinn/features/matches/domain/match_model.dart';
+import 'package:swipeinn/features/matches/presentation/matches_provider.dart';
 import 'package:swipeinn/features/navigation/presentation/main_navigation_shell.dart';
 
 import 'support/fake_auth_repository.dart';
+import 'support/fake_listings_repository.dart';
+import 'support/fake_matches_repository.dart';
 
 const _identity = AuthIdentity(
   uid: 'uid-1',
@@ -35,9 +41,38 @@ const _completeProfile = UserModel(
   ),
 );
 
-Widget _appWith(FakeAuthRepository fake) {
+ListingModel _listing({
+  String id = 'listing-1',
+  String ownerUid = 'uid-1',
+  String title = 'Lahug Studio',
+  double rent = 6500,
+}) {
+  return ListingModel(
+    id: id,
+    ownerUid: ownerUid,
+    title: title,
+    description: 'Bright studio near everything.',
+    monthlyRent: rent,
+    propertyType: PropertyType.studio,
+    latitude: 14.609,
+    longitude: 120.989,
+    createdAt: DateTime(2026, 1, 1),
+  );
+}
+
+Widget _appWith(
+  FakeAuthRepository auth, {
+  FakeListingsRepository? listings,
+  FakeMatchesRepository? matches,
+}) {
   return ProviderScope(
-    overrides: [authRepositoryProvider.overrideWithValue(fake)],
+    overrides: [
+      authRepositoryProvider.overrideWithValue(auth),
+      listingsRepositoryProvider
+          .overrideWithValue(listings ?? FakeListingsRepository()),
+      matchesRepositoryProvider
+          .overrideWithValue(matches ?? FakeMatchesRepository()),
+    ],
     child: const MaterialApp(home: MainNavigationShell()),
   );
 }
@@ -47,6 +82,14 @@ Widget _appWith(FakeAuthRepository fake) {
 Future<void> _advance(WidgetTester tester) async {
   for (var i = 0; i < 4; i++) {
     await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
+/// Drains snackbar timers and exit animations before the test binding tears
+/// down.
+Future<void> _drainSnackbars(WidgetTester tester) async {
+  for (var i = 0; i < 16; i++) {
+    await tester.pump(const Duration(milliseconds: 500));
   }
 }
 
@@ -146,7 +189,7 @@ void main() {
     expect(find.text('My Listings'), findsOneWidget);
     expect(find.text('Matches'), findsOneWidget);
     expect(find.text('Profile'), findsOneWidget);
-    expect(find.text('No listings yet'), findsOneWidget);
+    expect(find.text('No places to discover yet'), findsOneWidget);
   });
 
   testWidgets('the profile tab shows the saved preferences and owner badge',
@@ -174,12 +217,13 @@ void main() {
       initialIdentity: _identity,
       initialProfile: _completeProfile,
     );
+    final listings = FakeListingsRepository();
 
-    await tester.pumpWidget(_appWith(fake));
+    await tester.pumpWidget(_appWith(fake, listings: listings));
     await _advance(tester);
 
     await tester.tap(find.text('My Listings'));
-    await tester.pump();
+    await _advance(tester);
     expect(find.text('No listings published yet.'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.add_circle));
@@ -198,57 +242,85 @@ void main() {
     expect(find.text('No listings published yet.'), findsNothing);
     expect(find.text('Lahug Studio'), findsOneWidget);
     expect(find.textContaining('6500'), findsWidgets);
+    expect(listings.listings.values.single.ownerUid, 'uid-1');
 
     await tester.tap(find.text('Discover'));
     await _advance(tester);
 
     expect(find.text('Discover rentals'), findsOneWidget);
     expect(find.text('Lahug Studio'), findsOneWidget);
+    expect(find.text('YOUR LISTING'), findsOneWidget);
+
+    // Liking your own place must not create a self-match.
+    await tester.tap(find.byIcon(Icons.favorite));
+    await _advance(tester);
+    expect(listings.likes, isEmpty);
+    await _drainSnackbars(tester);
   });
 
-  testWidgets('liking a place and approving it opens a chat match',
+  testWidgets('liking someone else\'s place sends it to their review queue',
       (tester) async {
     final fake = FakeAuthRepository(
       initialIdentity: _identity,
       initialProfile: _completeProfile,
     );
+    final listings = FakeListingsRepository()
+      ..seedListing(_listing(id: 'listing-2', ownerUid: 'uid-2'));
 
-    await tester.pumpWidget(_appWith(fake));
+    await tester.pumpWidget(_appWith(fake, listings: listings));
     await _advance(tester);
 
-    // Publish a place.
-    await tester.tap(find.text('My Listings'));
-    await tester.pump();
-    await tester.tap(find.byIcon(Icons.add_circle));
-    await _advance(tester);
-    await tester.enterText(find.byType(TextField).at(0), 'Lahug Studio');
-    await tester.enterText(find.byType(TextField).at(2), '6500');
-    await tester.pump();
-    await tester.ensureVisible(find.text('Publish Listing Card'));
-    await tester.pump();
-    await tester.tap(find.text('Publish Listing Card'));
-    await _advance(tester);
-    expect(find.text('Publish New Listing Card'), findsNothing);
     expect(find.text('Lahug Studio'), findsOneWidget);
-    // Let the confirmation snackbar clear the navigation bar.
-    await tester.pump(const Duration(seconds: 5));
-
-    // Like it from Discover.
-    await tester.tap(find.text('Discover'));
-    await _advance(tester);
-    expect(find.text('Discover rentals'), findsOneWidget);
     await tester.tap(find.byIcon(Icons.favorite));
     await _advance(tester);
 
-    // Approve the interest from My Listings.
+    final like = listings.likes['listing-2']?['uid-1'];
+    expect(like, isNotNull);
+    expect(like?.requesterName, 'Renter');
+    expect(like?.status, LikeStatus.pending);
+    await _drainSnackbars(tester);
+  });
+
+  testWidgets('approving a like opens a match both sides can see',
+      (tester) async {
+    final fake = FakeAuthRepository(
+      initialIdentity: _identity,
+      initialProfile: _completeProfile,
+    );
+    final listings = FakeListingsRepository()
+      ..seedListing(_listing())
+      ..seedLike(
+        ListingLike(
+          listingId: 'listing-1',
+          requesterUid: 'uid-2',
+          requesterName: 'Maria Santos',
+          likedAt: DateTime(2026, 1, 1),
+        ),
+      );
+    final matches = FakeMatchesRepository();
+
+    await tester.pumpWidget(
+      _appWith(fake, listings: listings, matches: matches),
+    );
+    await _advance(tester);
+
     await tester.tap(find.text('My Listings'));
     await _advance(tester);
     await tester.tap(find.text('Review Queue'));
     await _advance(tester);
-    expect(find.text('Approve'), findsOneWidget);
+
+    expect(find.text('Maria Santos'), findsOneWidget);
     await tester.tap(find.text('Approve'));
     await _advance(tester);
     expect(find.text('No interest yet'), findsOneWidget);
+
+    final match = matches.matches['listing-1_uid-2'];
+    expect(match, isNotNull);
+    expect(match?.ownerUid, 'uid-1');
+    expect(match?.requesterUid, 'uid-2');
+    expect(match?.participantUids, containsAll(['uid-1', 'uid-2']));
+    expect(match?.listingTitle, 'Lahug Studio');
+    expect(listings.likes['listing-1']?['uid-2']?.status, LikeStatus.approved);
 
     // Back to the tab shell, then open Matches.
     await tester.pageBack();
@@ -258,9 +330,62 @@ void main() {
     expect(find.text('Lahug Studio'), findsOneWidget);
     expect(find.text('Waiting for the first message'), findsOneWidget);
 
-    // Drain the snackbar timers and their exit animations before teardown.
-    for (var i = 0; i < 16; i++) {
-      await tester.pump(const Duration(milliseconds: 500));
-    }
+    await _drainSnackbars(tester);
+  });
+
+  testWidgets('a match message is written and shown in the chat',
+      (tester) async {
+    final fake = FakeAuthRepository(
+      initialIdentity: _identity,
+      initialProfile: _completeProfile,
+    );
+    final listings = FakeListingsRepository()..seedListing(_listing());
+    final matches = FakeMatchesRepository();
+    final now = DateTime(2026, 1, 1, 12);
+    await matches.createMatch(
+      MatchModel(
+        id: 'listing-1_uid-1',
+        listingId: 'listing-1',
+        listingTitle: 'Lahug Studio',
+        ownerUid: 'uid-2',
+        requesterUid: 'uid-1',
+        participantUids: const ['uid-2', 'uid-1'],
+        matchedAt: now,
+        expiresAt: now.add(const Duration(hours: 24)),
+        messagesCount: 1,
+      ),
+    );
+    matches.messages['listing-1_uid-1'] = {
+      'seed': MessageModel(
+        id: 'seed',
+        senderUid: 'uid-2',
+        text: 'Hello! When would you like to view?',
+        sentAt: now,
+      ),
+    };
+
+    await tester.pumpWidget(
+      _appWith(fake, listings: listings, matches: matches),
+    );
+    await _advance(tester);
+
+    await tester.tap(find.text('Matches'));
+    await _advance(tester);
+    await tester.tap(find.text('Lahug Studio'));
+    await _advance(tester);
+
+    expect(find.text('Hello! When would you like to view?'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Saturday morning works.');
+    await tester.tap(find.byIcon(Icons.send));
+    await _advance(tester);
+
+    expect(find.text('Saturday morning works.'), findsOneWidget);
+    expect(
+      matches.messages['listing-1_uid-1']?.values
+          .any((message) => message.text == 'Saturday morning works.'),
+      isTrue,
+    );
+    await _drainSnackbars(tester);
   });
 }

@@ -1,24 +1,8 @@
-/// What kind of home a renter is looking for.
-enum PropertyType {
-  room('Room'),
-  bedspace('Bedspace'),
-  studio('Studio'),
-  apartment('Apartment'),
-  condo('Condo'),
-  house('House');
+import '../../../core/domain/property_type.dart';
 
-  const PropertyType(this.label);
-
-  final String label;
-
-  static PropertyType? fromName(Object? value) {
-    if (value is! String) return null;
-    for (final type in PropertyType.values) {
-      if (type.name == value) return type;
-    }
-    return null;
-  }
-}
+// Kept in this file's public surface so profile/onboarding imports do not have
+// to change when the enum moved to the shared domain layer.
+export '../../../core/domain/property_type.dart';
 
 /// How soon a renter wants to move in.
 enum MoveInWindow {
@@ -178,7 +162,8 @@ class UserModel {
       photoUrl: photoUrl ?? this.photoUrl,
       authProvider: authProvider ?? this.authProvider,
       isOwnerVerified: isOwnerVerified ?? this.isOwnerVerified,
-      hasCompletedOnboarding: hasCompletedOnboarding ?? this.hasCompletedOnboarding,
+      hasCompletedOnboarding:
+          hasCompletedOnboarding ?? this.hasCompletedOnboarding,
       preferences: preferences ?? this.preferences,
       createdAt: createdAt ?? this.createdAt,
     );

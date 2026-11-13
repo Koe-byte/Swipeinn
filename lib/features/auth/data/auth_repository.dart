@@ -119,6 +119,14 @@ class FirebaseAuthRepository implements AuthRepository {
     await user.reload();
     final refreshed = _auth.currentUser;
     if (refreshed == null) throw StateError('Session ended while reloading.');
+
+    // Firestore rules read email_verified from the ID token, which can lag the
+    // user record by up to an hour. Force a refresh once the address is
+    // confirmed so the first like or listing write is not permission-denied.
+    if (refreshed.emailVerified) {
+      await refreshed.getIdToken(true);
+    }
+
     return _toIdentity(refreshed);
   }
 
@@ -139,7 +147,10 @@ class FirebaseAuthRepository implements AuthRepository {
   Future<void> saveProfile(UserModel user) async {
     final map = user.toMap();
     map['updatedAt'] = FieldValue.serverTimestamp();
-    await _db.collection('users').doc(user.uid).set(map, SetOptions(merge: true));
+    await _db
+        .collection('users')
+        .doc(user.uid)
+        .set(map, SetOptions(merge: true));
   }
 
   static AuthIdentity _toIdentity(User user) {
