@@ -1,128 +1,153 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../domain/user_model.dart';
-import '../../../core/services/database_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-final authDatabaseRepositoryProvider = Provider<AuthDatabaseRepository>((ref) {
-  return AuthDatabaseRepository();
+import '../domain/auth_state.dart';
+import '../domain/user_model.dart';
+
+/// The default backend. Tests override this provider with an in-memory
+/// implementation so the suite never needs a live Firebase project.
+final authRepositoryProvider = Provider<AuthRepository>((ref) {
+  return FirebaseAuthRepository();
 });
 
-class AuthDatabaseRepository {
-  final DatabaseService _db = DatabaseService.instance;
+/// Everything the app needs from the identity provider and the profile store.
+abstract class AuthRepository {
+  /// Emits on every Firebase session change, including token refreshes that
+  /// flip [AuthIdentity.isEmailVerified].
+  Stream<AuthIdentity?> authStateChanges();
 
-  FirebaseAuth? get firebaseAuth {
-    if (_db.isFirebaseAvailable) {
-      try {
-        return FirebaseAuth.instance;
-      } catch (e) {
-        debugPrint('[AuthDatabaseRepository] FirebaseAuth unavailable: $e');
-        return null;
-      }
-    }
-    return null;
+  AuthIdentity? get currentIdentity;
+
+  Future<AuthIdentity> signUp({
+    required String email,
+    required String password,
+    required String displayName,
+  });
+
+  Future<AuthIdentity> signIn({
+    required String email,
+    required String password,
+  });
+
+  Future<void> signOut();
+
+  Future<void> sendEmailVerification();
+
+  /// Re-reads the user record so a freshly clicked verification link is seen.
+  Future<AuthIdentity> reloadIdentity();
+
+  Future<void> sendPasswordReset(String email);
+
+  Future<UserModel?> fetchProfile(String uid);
+
+  Future<void> saveProfile(UserModel user);
+}
+
+class FirebaseAuthRepository implements AuthRepository {
+  FirebaseAuth get _auth => FirebaseAuth.instance;
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+
+  @override
+  AuthIdentity? get currentIdentity {
+    final user = _auth.currentUser;
+    return user == null ? null : _toIdentity(user);
   }
 
-  /// Persists a profile to the local cache and Firestore.
-  ///
-  /// Returns `true` when the cloud write succeeded (or when running without
-  /// Firestore). A `false` result means the profile is still safe in the
-  /// durable local cache and will be retried on the next sign-in.
-  Future<bool> saveUserProfile(UserModel user) async {
-    // Mock/local identities have no Firebase Auth user, so Firestore must
-    // never be touched for them. The durable local cache is authoritative.
-    if (firebaseAuth == null) {
-      await cacheUserProfileLocally(user);
-      return true;
-    }
-
-    final map = user.toMap();
-    map['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
-    final persisted = await _db.setDocument(
-      collection: 'users',
-      docId: user.uid,
-      data: map,
-    );
-    if (!persisted) {
-      debugPrint(
-        '[Auth] users/${user.uid} is cached locally but not yet in Firestore; '
-        'it will be retried on the next sign-in.',
-      );
-    }
-    return persisted;
-  }
-
-  Future<UserModel?> fetchUserProfile(String uid) async {
-    final data = await _db.getDocument(collection: 'users', docId: uid);
-    if (data == null) return null;
-    return UserModel.fromMap(data, uid);
-  }
-
-  /// Reads only the durable local mirror. Mock/demo identities use this so
-  /// they never trigger Firestore reads or writes.
-  Future<UserModel?> fetchLocalUserProfile(String uid) async {
-    final data = await _db.getLocalDocument(collection: 'users', docId: uid);
-    if (data == null) return null;
-    return UserModel.fromMap(data, uid);
-  }
-
-  /// Re-uploads a cached profile when the Firestore document is missing.
-  ///
-  /// This repairs accounts that signed in while rules or network access were
-  /// failing: the local cache still has the profile, but `users/{uid}` was
-  /// never created.
-  Future<void> ensureProfileInCloud(UserModel user) async {
-    final fs = _db.firestore;
-    if (fs == null) return;
-    try {
-      final snapshot = await fs
-          .collection('users')
-          .doc(user.uid)
-          .get()
-          .timeout(const Duration(seconds: 5));
-      final cloud = snapshot.data();
-      final local = await _db.getLocalDocument(
-        collection: 'users',
-        docId: user.uid,
-      );
-
-      final cloudUpdatedAt = cloud?['updatedAt'];
-      final localUpdatedAt = local?['updatedAt'];
-      final localIsNewer = localUpdatedAt is num &&
-          cloudUpdatedAt is num &&
-          localUpdatedAt > cloudUpdatedAt;
-
-      if (snapshot.exists && !localIsNewer) return;
-
-      debugPrint(
-        snapshot.exists
-            ? '[Auth] users/${user.uid} is older than the local cache; '
-                're-uploading the cached profile.'
-            : '[Auth] users/${user.uid} is missing in Firestore; re-uploading '
-                'the cached profile.',
-      );
-      await saveUserProfile(user);
-    } catch (e) {
-      debugPrint('[Auth] Profile cloud check failed for users/${user.uid}: $e');
-    }
-  }
-
-  /// Persists the profile to the durable local cache only, without waiting for
-  /// a Cloud Firestore roundtrip.
-  Future<void> cacheUserProfileLocally(UserModel user) async {
-    final map = user.toMap();
-    map['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
-    await _db.cacheDocumentLocally(
-      collection: 'users',
-      docId: user.uid,
-      data: map,
-    );
-  }
-
-  Stream<UserModel?> streamUserProfile(String uid) {
-    return _db.streamDocument(collection: 'users', docId: uid).map((data) {
-      if (data == null) return null;
-      return UserModel.fromMap(data, uid);
+  @override
+  Stream<AuthIdentity?> authStateChanges() {
+    return _auth.authStateChanges().map((user) {
+      return user == null ? null : _toIdentity(user);
     });
+  }
+
+  @override
+  Future<AuthIdentity> signUp({
+    required String email,
+    required String password,
+    required String displayName,
+  }) async {
+    final credential = await _auth.createUserWithEmailAndPassword(
+      email: email.trim(),
+      password: password,
+    );
+    final user = credential.user;
+    if (user == null) {
+      throw StateError('Account creation returned no user.');
+    }
+
+    final name =
+        displayName.trim().isEmpty ? 'Swipeinn user' : displayName.trim();
+    await user.updateDisplayName(name);
+
+    // Verification is sent before any Firestore write so a network failure
+    // never strands an account that cannot be verified. The profile document
+    // is created by the auth gate once the address is confirmed.
+    await user.sendEmailVerification();
+
+    return _toIdentity(user);
+  }
+
+  @override
+  Future<AuthIdentity> signIn({
+    required String email,
+    required String password,
+  }) async {
+    final credential = await _auth.signInWithEmailAndPassword(
+      email: email.trim(),
+      password: password,
+    );
+    final user = credential.user;
+    if (user == null) throw StateError('Sign-in returned no user.');
+    return _toIdentity(user);
+  }
+
+  @override
+  Future<void> signOut() => _auth.signOut();
+
+  @override
+  Future<void> sendEmailVerification() async {
+    final user = _auth.currentUser;
+    if (user == null) throw StateError('No signed-in user to verify.');
+    await user.sendEmailVerification();
+  }
+
+  @override
+  Future<AuthIdentity> reloadIdentity() async {
+    final user = _auth.currentUser;
+    if (user == null) throw StateError('No signed-in user to reload.');
+    await user.reload();
+    final refreshed = _auth.currentUser;
+    if (refreshed == null) throw StateError('Session ended while reloading.');
+    return _toIdentity(refreshed);
+  }
+
+  @override
+  Future<void> sendPasswordReset(String email) {
+    return _auth.sendPasswordResetEmail(email: email.trim());
+  }
+
+  @override
+  Future<UserModel?> fetchProfile(String uid) async {
+    final snapshot = await _db.collection('users').doc(uid).get();
+    final data = snapshot.data();
+    if (data == null) return null;
+    return UserModel.fromMap(data, uid);
+  }
+
+  @override
+  Future<void> saveProfile(UserModel user) async {
+    final map = user.toMap();
+    map['updatedAt'] = FieldValue.serverTimestamp();
+    await _db.collection('users').doc(user.uid).set(map, SetOptions(merge: true));
+  }
+
+  static AuthIdentity _toIdentity(User user) {
+    return AuthIdentity(
+      uid: user.uid,
+      email: user.email ?? '',
+      displayName: user.displayName ?? '',
+      isEmailVerified: user.emailVerified,
+    );
   }
 }

@@ -23,7 +23,10 @@ class MatchModel {
   final String studentUid;
   final MatchStatus status;
   final DateTime matchedAt;
-  final DateTime expiresAt; // matchedAt + 24 hours
+
+  /// Kept for the Phase 2 renewal flow. Match expiry is disabled in v1, so a
+  /// conversation stays open until it is explicitly closed.
+  final DateTime expiresAt;
   final int messagesCount;
   final ViewingStatus viewingStatus;
   final DateTime? viewingDate;
@@ -43,9 +46,8 @@ class MatchModel {
 
   bool get isExpired {
     if (status == MatchStatus.expired) return true;
-    if (messagesCount == 0 && DateTime.now().isAfter(expiresAt)) {
-      return true;
-    }
+    // v1 has no match-renewal flow, so a silent 24-hour timeout would kill
+    // conversations mid-demo. Only an explicit status change ends a match.
     return false;
   }
 
@@ -83,7 +85,10 @@ class MatchModel {
         map['matchedAt'] ?? DateTime.now().millisecondsSinceEpoch,
       ),
       expiresAt: DateTime.fromMillisecondsSinceEpoch(
-        map['expiresAt'] ?? DateTime.now().add(const Duration(hours: 24)).millisecondsSinceEpoch,
+        map['expiresAt'] ??
+            DateTime.now()
+                .add(const Duration(hours: 24))
+                .millisecondsSinceEpoch,
       ),
       messagesCount: map['messagesCount'] ?? 0,
       viewingStatus: ViewingStatus.values.firstWhere(

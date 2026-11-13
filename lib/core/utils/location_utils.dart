@@ -29,10 +29,10 @@ class LocationUtils {
   // Format meters to human readable distance string
   static String formatDistance(double meters) {
     if (meters < 1000) {
-      return '${meters.round()}m from campus';
+      return '${meters.round()}m away';
     } else {
       final km = meters / 1000;
-      return '${km.toStringAsFixed(1)}km from campus';
+      return '${km.toStringAsFixed(1)}km away';
     }
   }
 }

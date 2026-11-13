@@ -1,0 +1,89 @@
+import 'user_model.dart';
+
+/// Where the person is in the sign-in funnel.
+enum AuthStatus {
+  /// Reading the persisted Firebase session on cold start.
+  restoring,
+
+  /// No Firebase session.
+  signedOut,
+
+  /// Signed in, but the email address has not been confirmed yet.
+  unverified,
+
+  /// Email confirmed, profile loaded, but the two-step preferences are missing.
+  needsOnboarding,
+
+  /// Full access.
+  ready,
+
+  /// The backend could not be reached or configured. The UI shows a retry.
+  failure,
+}
+
+/// The slice of Firebase Auth identity the app needs. Kept separate from
+/// [UserModel] because it exists even before the Firestore profile does.
+class AuthIdentity {
+  final String uid;
+  final String email;
+  final String displayName;
+  final bool isEmailVerified;
+
+  const AuthIdentity({
+    required this.uid,
+    required this.email,
+    required this.displayName,
+    required this.isEmailVerified,
+  });
+}
+
+/// Immutable snapshot consumed by the auth gate.
+class AuthState {
+  final AuthStatus status;
+  final UserModel? user;
+  final String? email;
+  final String? errorMessage;
+
+  /// Non-error notice, such as "verification email sent".
+  final String? infoMessage;
+
+  /// True while a sign-in, sign-up, reset, or profile write is in flight.
+  /// Kept separate from [status] so screens can show a spinner without
+  /// unmounting themselves.
+  final bool isSubmitting;
+
+  const AuthState({
+    this.status = AuthStatus.restoring,
+    this.user,
+    this.email,
+    this.errorMessage,
+    this.infoMessage,
+    this.isSubmitting = false,
+  });
+
+  bool get isSignedIn =>
+      status == AuthStatus.unverified ||
+      status == AuthStatus.needsOnboarding ||
+      status == AuthStatus.ready;
+
+  AuthState copyWith({
+    AuthStatus? status,
+    UserModel? user,
+    String? email,
+    String? errorMessage,
+    String? infoMessage,
+    bool clearError = false,
+    bool clearInfo = false,
+    bool clearUser = false,
+    bool? isSubmitting,
+  }) {
+    return AuthState(
+      status: status ?? this.status,
+      user: clearUser ? null : (user ?? this.user),
+      email: email ?? this.email,
+      errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      infoMessage: clearInfo ? null : (infoMessage ?? this.infoMessage),
+      isSubmitting: isSubmitting ?? this.isSubmitting,
+    );
+  }
+}

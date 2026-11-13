@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/match_model.dart';
 import 'matches_provider.dart';
 import '../../auth/presentation/auth_provider.dart';
-import '../../auth/domain/user_model.dart';
-import '../../../core/services/database_service.dart';
 import '../../../core/theme/app_theme.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -38,9 +36,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       orElse: () => widget.match,
     );
     final messages = ref.watch(messagesProvider(widget.match.id));
-    final user = ref.watch(authStateProvider).valueOrNull;
-    final isStudent = user?.role == UserRole.student;
-    final isMatchActive = currentMatch.status == MatchStatus.active && !currentMatch.isExpired;
+    final user = ref.watch(authStateProvider).user;
+    final isRequester = user != null && user.uid == currentMatch.studentUid;
+    final isMatchActive =
+        currentMatch.status == MatchStatus.active && !currentMatch.isExpired;
     final needsFirstMove = currentMatch.messagesCount == 0;
 
     return Scaffold(
@@ -48,12 +47,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         title: Column(
           children: [
             Text(
-              isStudent ? 'Host • ${widget.listingTitle}' : 'Student • ${widget.listingTitle}',
+              isRequester
+                  ? 'Owner • ${widget.listingTitle}'
+                  : 'Renter • ${widget.listingTitle}',
               style: const TextStyle(fontSize: 15),
             ),
             Text(
-              isStudent ? 'Direct with Landlord' : 'Direct with Applicant',
-              style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+              isRequester ? 'Direct with owner' : 'Direct with renter',
+              style:
+                  const TextStyle(fontSize: 10, color: AppTheme.textSecondary),
             ),
           ],
         ),
@@ -67,21 +69,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: Column(
         children: [
-          // 24h Bumble Banner
+          // First-move banner: the renter opens the conversation.
           if (needsFirstMove)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               color: AppTheme.primaryAmber.withOpacity(0.18),
               child: Row(
                 children: [
-                  const Icon(Icons.alarm, color: AppTheme.navyDark, size: 20),
+                  const Icon(Icons.forum_outlined,
+                      color: AppTheme.navyDark, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      isStudent
-                          ? 'You have 24 hours to send the first message to unlock this chat.'
-                          : 'Waiting for the student to send the first message.',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      isRequester
+                          ? 'Send the first message to open this chat.'
+                          : 'Waiting for the renter to send the first message.',
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
@@ -97,14 +101,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.chat_bubble_outline, size: 48, color: AppTheme.textSecondary),
+                          const Icon(Icons.chat_bubble_outline,
+                              size: 48, color: AppTheme.textSecondary),
                           const SizedBox(height: 12),
                           Text(
-                            isStudent
+                            isRequester
                                 ? 'Tap a quick icebreaker below or send a message to break the ice!'
-                                : 'The student must make the first move.',
+                                : 'The renter must make the first move.',
                             textAlign: TextAlign.center,
-                            style: const TextStyle(color: AppTheme.textSecondary),
+                            style:
+                                const TextStyle(color: AppTheme.textSecondary),
                           ),
                         ],
                       ),
@@ -115,30 +121,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     itemCount: messages.length,
                     itemBuilder: (context, index) {
                       final msg = messages[index];
-                      final isMe = isStudent
-                          ? (msg.senderUid == currentMatch.studentUid || msg.senderUid == (user?.uid ?? ''))
-                          : (msg.senderUid == currentMatch.landlordUid || msg.senderUid == (user?.uid ?? ''));
+                      final isMe = msg.senderUid == (user?.uid ?? '');
 
                       if (msg.type == MessageType.viewingProposal) {
                         return _ViewingProposalBubble(
                           msg: msg,
-                          isLandlord: !isStudent,
+                          isLandlord: !isRequester,
                           onAccept: () {
                             ref
-                                .read(messagesProvider(widget.match.id).notifier)
+                                .read(
+                                    messagesProvider(widget.match.id).notifier)
                                 .updateProposalStatus(msg.id, 'accepted');
                             ref
                                 .read(matchesProvider.notifier)
-                                .updateViewingStatus(widget.match.id, ViewingStatus.confirmed, msg.viewingDate);
+                                .updateViewingStatus(widget.match.id,
+                                    ViewingStatus.confirmed, msg.viewingDate);
                           },
                         );
                       }
 
                       return Align(
-                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                        alignment:
+                            isMe ? Alignment.centerRight : Alignment.centerLeft,
                         child: Container(
                           margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
                             color: isMe ? AppTheme.primaryAmber : Colors.white,
                             borderRadius: BorderRadius.circular(16),
@@ -164,7 +172,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
 
           // Student Icebreaker Chips
-          if (isStudent && needsFirstMove)
+          if (isRequester && needsFirstMove)
             Container(
               height: 48,
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -178,7 +186,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           backgroundColor: Colors.amber.shade100,
                           label: Text(
                             prompt,
-                            style: const TextStyle(fontSize: 12, color: AppTheme.navyDark),
+                            style: const TextStyle(
+                                fontSize: 12, color: AppTheme.navyDark),
                           ),
                           onPressed: () {
                             _sendMessage(prompt);
@@ -201,19 +210,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.event_available, color: AppTheme.primaryDarkAmber),
+                    icon: const Icon(Icons.event_available,
+                        color: AppTheme.primaryDarkAmber),
                     tooltip: 'Schedule Viewing',
-                    onPressed: isMatchActive ? () => _showScheduleViewingDialog(context) : null,
+                    onPressed: isMatchActive
+                        ? () => _showScheduleViewingDialog(context)
+                        : null,
                   ),
                   Expanded(
                     child: TextField(
                       controller: _messageController,
-                      enabled: isMatchActive && (!needsFirstMove || isStudent),
+                      enabled:
+                          isMatchActive && (!needsFirstMove || isRequester),
                       decoration: InputDecoration(
-                        hintText: needsFirstMove && !isStudent
-                            ? 'Waiting for student first move...'
+                        hintText: needsFirstMove && !isRequester
+                            ? 'Waiting for the renter...'
                             : 'Type a message...',
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
                           borderSide: BorderSide.none,
@@ -226,7 +240,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   const SizedBox(width: 8),
                   IconButton(
                     icon: const Icon(Icons.send, color: AppTheme.navyDark),
-                    onPressed: isMatchActive && (!needsFirstMove || isStudent)
+                    onPressed: isMatchActive && (!needsFirstMove || isRequester)
                         ? () {
                             if (_messageController.text.trim().isNotEmpty) {
                               _sendMessage(_messageController.text.trim());
@@ -250,31 +264,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       (m) => m.id == widget.match.id,
       orElse: () => widget.match,
     );
-    final user = ref.read(authStateProvider).valueOrNull;
-    final isStudent = user?.role == UserRole.student;
-    final senderUid = isStudent ? currentMatch.studentUid : currentMatch.landlordUid;
+    final user = ref.read(authStateProvider).user;
+    final isRequester = user != null && user.uid == currentMatch.studentUid;
+    final senderUid =
+        isRequester ? currentMatch.studentUid : currentMatch.landlordUid;
 
     ref.read(messagesProvider(widget.match.id).notifier).sendMessage(
           senderUid: senderUid,
           text: text,
         );
     ref.read(matchesProvider.notifier).incrementMessageCount(widget.match.id);
-
-    // If student just sent first move or inquiry, simulate a responsive
-    // landlord reply in local/demo mode only. With Firebase configured, the
-    // write would be attributed to the landlord and rejected by the rules.
-    if (isStudent &&
-        currentMatch.messagesCount == 0 &&
-        DatabaseService.instance.firestore == null) {
-      Future.delayed(const Duration(milliseconds: 600), () {
-        if (!mounted) return;
-        ref.read(messagesProvider(widget.match.id).notifier).sendMessage(
-              senderUid: currentMatch.landlordUid,
-              text: 'Hello! Thanks for reaching out. Yes, the unit is available! Feel free to request an ocular viewing date.',
-            );
-        ref.read(matchesProvider.notifier).incrementMessageCount(widget.match.id);
-      });
-    }
   }
 
   void _showScheduleViewingDialog(BuildContext context) {
@@ -283,9 +282,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       (m) => m.id == widget.match.id,
       orElse: () => widget.match,
     );
-    final user = ref.read(authStateProvider).valueOrNull;
-    final isStudent = user?.role == UserRole.student;
-    final senderUid = isStudent ? currentMatch.studentUid : currentMatch.landlordUid;
+    final user = ref.read(authStateProvider).user;
+    final isRequester = user != null && user.uid == currentMatch.studentUid;
+    final senderUid =
+        isRequester ? currentMatch.studentUid : currentMatch.landlordUid;
 
     DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
 
@@ -302,29 +302,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               type: MessageType.viewingProposal,
               viewingDate: pickedDate,
             );
-        ref.read(matchesProvider.notifier).incrementMessageCount(widget.match.id);
         ref
             .read(matchesProvider.notifier)
-            .updateViewingStatus(widget.match.id, ViewingStatus.proposed, pickedDate);
-
-        // Responsive landlord confirmation for realistic bilateral demo
-        if (isStudent) {
-          Future.delayed(const Duration(milliseconds: 800), () {
-            if (!mounted) return;
-            final msgs = ref.read(messagesProvider(widget.match.id));
-            final proposalMsg = msgs.lastWhere(
-              (m) => m.type == MessageType.viewingProposal && m.proposalStatus == 'pending',
-              orElse: () => msgs.last,
-            );
-            ref.read(messagesProvider(widget.match.id).notifier).updateProposalStatus(proposalMsg.id, 'accepted');
-            ref.read(matchesProvider.notifier).updateViewingStatus(widget.match.id, ViewingStatus.confirmed, pickedDate);
-            ref.read(messagesProvider(widget.match.id).notifier).sendMessage(
-                  senderUid: currentMatch.landlordUid,
-                  text: 'Sounds great! I have accepted your viewing schedule. See you then!',
-                );
-            ref.read(matchesProvider.notifier).incrementMessageCount(widget.match.id);
-          });
-        }
+            .incrementMessageCount(widget.match.id);
+        ref.read(matchesProvider.notifier).updateViewingStatus(
+            widget.match.id, ViewingStatus.proposed, pickedDate);
       }
     });
   }
@@ -348,10 +330,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               const SizedBox(height: 16),
               ListTile(
                 leading: const Icon(Icons.block, color: AppTheme.passRed),
-                title: const Text('Unmatch & Block User', style: TextStyle(color: AppTheme.passRed)),
-                subtitle: const Text('Instantly closes this chat and prevents future card appearances.'),
+                title: const Text('Unmatch & Block User',
+                    style: TextStyle(color: AppTheme.passRed)),
+                subtitle: const Text(
+                    'Instantly closes this chat and prevents future card appearances.'),
                 onTap: () {
-                  ref.read(matchesProvider.notifier).unmatchAndBlock(widget.match.id);
+                  ref
+                      .read(matchesProvider.notifier)
+                      .unmatchAndBlock(widget.match.id);
                   Navigator.pop(ctx);
                   Navigator.pop(context);
                 },
@@ -397,7 +383,7 @@ class _ViewingProposalBubble extends StatelessWidget {
               Icon(Icons.calendar_month, color: AppTheme.navyDark, size: 20),
               SizedBox(width: 8),
               Text(
-                'Dorm Inspection Proposal',
+                'Viewing Proposal',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               ),
             ],
@@ -414,7 +400,10 @@ class _ViewingProposalBubble extends StatelessWidget {
               ),
               child: const Text(
                 '✓ Viewing Confirmed',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12),
               ),
             )
           else if (isLandlord)
@@ -425,7 +414,10 @@ class _ViewingProposalBubble extends StatelessWidget {
           else
             const Text(
               'Awaiting Landlord Confirmation...',
-              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary, fontStyle: FontStyle.italic),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary,
+                  fontStyle: FontStyle.italic),
             ),
         ],
       ),

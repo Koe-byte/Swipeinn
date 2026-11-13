@@ -6,9 +6,28 @@ Swipeinn is a bilateral rental discovery app. Owners list places, renters swipe 
 
 ## Current status
 
-Phase 0: Swipeinn rebrand and Firebase/Android setup.
+Phase 1: real email/password authentication.
 
-The app is being migrated from the original student-only Rently demo. Demo authentication, seeded listings, sample likes/matches, and simulated chat replies are removed in Phase 1, followed by the real Firestore data model and rules in Phase 2.
+- Sign-up creates a Firebase Auth account and sends a verification email. The
+  app stays at the verification gate until the address is confirmed.
+- A required two-step preferences flow (property type + budget, then areas +
+  move-in window) runs once per account and is stored in `users/{uid}`.
+- One account can browse and publish; the only badge is the admin-granted
+  "Verified owner" flag.
+- Demo accounts, demo buttons, the local-auth fallback, seeded listings, sample
+  likes/matches, and simulated chat replies are gone.
+- Listings and matches still live in memory for v1; Firestore persistence and
+  rules are Phase 2. A match created in a session is available until the app
+  restarts.
+
+## Demo script
+
+1. `flutter run -d chrome` (or open the hosted build).
+2. Create an account with an address you can open.
+3. Click the verification link, then "I've verified my email".
+4. Complete the two onboarding steps.
+5. Publish a place from **My Listings**, like it from **Discover**, approve the
+   interest from that listing's **Review Queue**, and open **Matches** to chat.
 
 ## Stack
 

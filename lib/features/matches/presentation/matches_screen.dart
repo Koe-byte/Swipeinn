@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/match_model.dart';
 import 'matches_provider.dart';
 import '../../listings/presentation/landlord_studio_screen.dart';
-import '../../auth/presentation/auth_provider.dart';
-import '../../auth/domain/user_model.dart';
 import '../../../core/theme/app_theme.dart';
 import 'chat_screen.dart';
 
@@ -14,11 +12,14 @@ class MatchesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final matches = ref.watch(matchesProvider);
-    final user = ref.watch(authStateProvider).valueOrNull;
     final listings = ref.watch(listingsProvider);
 
-    final activeMatches = matches.where((m) => m.status == MatchStatus.active && !m.isExpired).toList();
-    final expiredMatches = matches.where((m) => m.isExpired || m.status == MatchStatus.expired).toList();
+    final activeMatches = matches
+        .where((m) => m.status == MatchStatus.active && !m.isExpired)
+        .toList();
+    final expiredMatches = matches
+        .where((m) => m.isExpired || m.status == MatchStatus.expired)
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -31,15 +32,17 @@ class MatchesScreen extends ConsumerWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: const [
-                    Icon(Icons.favorite_border, size: 64, color: AppTheme.textSecondary),
+                    Icon(Icons.favorite_border,
+                        size: 64, color: AppTheme.textSecondary),
                     SizedBox(height: 16),
                     Text(
                       'No matches yet',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                     SizedBox(height: 8),
                     Text(
-                      'When mutual interest occurs, your 24h direct chat unlocks here.',
+                      'When you like a place and the owner approves, your chat opens here.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: AppTheme.textSecondary),
                     ),
@@ -52,8 +55,11 @@ class MatchesScreen extends ConsumerWidget {
               children: [
                 if (activeMatches.isNotEmpty) ...[
                   const Text(
-                    'Active Chats (24h Window)',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.navyDark),
+                    'Active Chats',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.navyDark),
                   ),
                   const SizedBox(height: 8),
                   ...activeMatches.map((m) {
@@ -64,12 +70,12 @@ class MatchesScreen extends ConsumerWidget {
                     return _MatchCard(
                       match: m,
                       listingTitle: listing.title,
-                      isStudent: user?.role == UserRole.student,
                       onTap: () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => ChatScreen(match: m, listingTitle: listing.title),
+                            builder: (_) => ChatScreen(
+                                match: m, listingTitle: listing.title),
                           ),
                         );
                       },
@@ -80,7 +86,10 @@ class MatchesScreen extends ConsumerWidget {
                   const SizedBox(height: 20),
                   const Text(
                     'Expired Matches',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textSecondary),
                   ),
                   const SizedBox(height: 8),
                   ...expiredMatches.map((m) {
@@ -90,10 +99,13 @@ class MatchesScreen extends ConsumerWidget {
                     );
                     return ListTile(
                       tileColor: Colors.grey.shade100,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      leading: const Icon(Icons.timer_off_outlined, color: Colors.grey),
-                      title: Text(listing.title, style: const TextStyle(color: Colors.grey)),
-                      subtitle: const Text('24h First Move elapsed without message'),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      leading: const Icon(Icons.timer_off_outlined,
+                          color: Colors.grey),
+                      title: Text(listing.title,
+                          style: const TextStyle(color: Colors.grey)),
+                      subtitle: const Text('This match is closed'),
                     );
                   }).toList(),
                 ],
@@ -106,20 +118,16 @@ class MatchesScreen extends ConsumerWidget {
 class _MatchCard extends StatelessWidget {
   final MatchModel match;
   final String listingTitle;
-  final bool isStudent;
   final VoidCallback onTap;
 
   const _MatchCard({
     required this.match,
     required this.listingTitle,
-    required this.isStudent,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final remainingHours = match.remainingTime.inHours;
-
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -148,23 +156,32 @@ class _MatchCard extends StatelessWidget {
               ),
           ],
         ),
-        title: Text(listingTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(listingTitle,
+            style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 4),
             Row(
               children: [
-                const Icon(Icons.timer, size: 14, color: AppTheme.primaryDarkAmber),
+                Icon(
+                  match.messagesCount == 0
+                      ? Icons.mark_chat_unread_outlined
+                      : Icons.chat_bubble_outline,
+                  size: 14,
+                  color: AppTheme.primaryDarkAmber,
+                ),
                 const SizedBox(width: 4),
                 Text(
                   match.messagesCount == 0
-                      ? '$remainingHours hrs left for First Move'
-                      : 'Chat Unlocked',
+                      ? 'Waiting for the first message'
+                      : 'Chat opened',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: match.messagesCount == 0 ? AppTheme.primaryDarkAmber : AppTheme.likeGreen,
+                    color: match.messagesCount == 0
+                        ? AppTheme.primaryDarkAmber
+                        : AppTheme.likeGreen,
                   ),
                 ),
               ],
@@ -174,7 +191,10 @@ class _MatchCard extends StatelessWidget {
                 padding: EdgeInsets.only(top: 4.0),
                 child: Text(
                   '📅 In-Person Inspection Requested',
-                  style: TextStyle(fontSize: 12, color: AppTheme.navyDark, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.navyDark,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
           ],

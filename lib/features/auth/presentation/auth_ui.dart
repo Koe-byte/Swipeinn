@@ -32,22 +32,34 @@ class AuthErrorBanner extends StatelessWidget {
   }
 }
 
-class AuthOrDivider extends StatelessWidget {
-  final String label;
+class AuthInfoBanner extends StatelessWidget {
+  final String message;
 
-  const AuthOrDivider({Key? key, required this.label}) : super(key: key);
+  const AuthInfoBanner({Key? key, required this.message}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(child: Divider(color: Colors.grey.shade300)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-        ),
-        Expanded(child: Divider(color: Colors.grey.shade300)),
-      ],
+    return Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.green.shade200),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.check_circle_outline, color: Colors.green.shade700, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: Colors.green.shade900, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

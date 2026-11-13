@@ -20,8 +20,12 @@ for continuity; see `.firebaserc` and `lib/firebase_options.dart`.
 In the [Firebase Console](https://console.firebase.google.com/project/rently-ph/authentication/providers):
 
 1. Enable **Email/Password**. This is the only sign-in method Swipeinn supports.
-2. Disable Google, Facebook, phone, and anonymous sign-in. The current UI still
-   contains legacy Google/Facebook buttons; they are removed in Phase 1.
+2. Disable Google, Facebook, phone, and anonymous sign-in. The Google/Facebook
+   buttons and their code were removed in Phase 1.
+
+Verified on 2026-11-13: a sign-in probe with a nonexistent account returns
+`INVALID_LOGIN_CREDENTIALS`, which means Email/Password is enabled (a disabled
+provider returns `OPERATION_NOT_ALLOWED`).
 
 Under **Authentication → Settings → Authorized domains**, keep:
 
@@ -89,9 +93,9 @@ flutter build web --release
 firebase deploy --only hosting:swipeinn
 ```
 
-`https://swipeinn.web.app` currently serves a branded placeholder. The real
-Flutter build is deployed in Phase 5 after demo authentication and seeded data
-are removed.
+`https://swipeinn.web.app` serves the Phase 1 Flutter build: real email/password
+auth, the verification gate, and the two-step preferences onboarding. Deploy
+again after each phase that changes user-facing behavior.
 
 The old `https://rently-ph.web.app` site remains available for a future redirect.
 
@@ -103,9 +107,11 @@ The Android app is registered as **Swipeinn Android** with package
 already applied.
 
 ```powershell
-flutter build apk --debug --target-platform android-x64
-flutter install
+flutter build apk --debug --target-platform android-x64   # emulator only
+flutter build apk --release --target-platform android-arm64  # installable on a phone
 ```
+
+The arm64 release APK is debug-signed until a release keystore is configured.
 
 `android/gradle.properties` caps Gradle at a 1.5 GB heap and two workers
 because the development machine has 6 GB RAM. Raise those limits only on a
@@ -119,13 +125,21 @@ milestone after Phase 5.
 
 There are no supported demo accounts. The fixed `student.demo@rently.ph` and
 `host.demo@rently.ph` users, the `RentlyDemo123!` password, and the demo buttons
-on the landing screen are removed in Phase 1.
+on the landing screen were removed in Phase 1. Create a real account through
+the app.
 
 Seeded Firestore listings, likes, matches, and messages must be deleted before
 real use. Back up the data first, then clear the collections in the Console or
 with the Firestore Admin API. The Firebase CLI can delete documents but cannot
 delete Auth users; remove those in **Authentication → Users** or with the Admin
 SDK.
+
+### Verified owner badge
+
+`users/{uid}.isOwnerVerified` is admin-granted only. Set it to `true` in the
+Firestore Console for accounts that should carry the badge. The app never writes
+this field, and the badge is a trust signal rather than a permission: any
+account can publish listings without it.
 
 ## 7. Local verification
 

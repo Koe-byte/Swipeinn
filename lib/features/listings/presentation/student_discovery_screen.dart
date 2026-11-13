@@ -3,27 +3,37 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/listing_model.dart';
 import 'landlord_studio_screen.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/location_utils.dart';
 import '../../auth/presentation/auth_provider.dart';
 
-// Keeps track of active student like intent on listings
+// Tracks like intent on listings for the current session.
 final studentLikesProvider = StateProvider<Map<String, Set<String>>>((ref) => {
-  // listingId -> Set of studentUids who liked it
-  'listing_01': {'student_sample_1', 'student_sample_2'},
-  'listing_02': {'student_sample_1'},
-});
+      // listingId -> Set of user uids who liked it
+    });
 
 class StudentDiscoveryScreen extends ConsumerStatefulWidget {
   const StudentDiscoveryScreen({Key? key}) : super(key: key);
 
   @override
-  ConsumerState<StudentDiscoveryScreen> createState() => _StudentDiscoveryScreenState();
+  ConsumerState<StudentDiscoveryScreen> createState() =>
+      _StudentDiscoveryScreenState();
 }
 
-class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen> {
+class _StudentDiscoveryScreenState
+    extends ConsumerState<StudentDiscoveryScreen> {
   int _currentIndex = 0;
   double _maxRentFilter = 10000.0;
   RoomType? _selectedRoomTypeFilter;
+
+  @override
+  void initState() {
+    super.initState();
+    final preferences = ref.read(authStateProvider).user?.preferences;
+    if (preferences == null) return;
+
+    // Seed the first deck with the onboarding budget. Type preferences are
+    // stored for Phase 2 ranking but do not hard-filter the deck in v1.
+    _maxRentFilter = preferences.budgetMax.toDouble();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +43,8 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
     final listings = allListings.where((l) {
       if (l.status != ListingStatus.available) return false;
       if (l.monthlyRent > _maxRentFilter) return false;
-      if (_selectedRoomTypeFilter != null && l.roomType != _selectedRoomTypeFilter) {
+      if (_selectedRoomTypeFilter != null &&
+          l.roomType != _selectedRoomTypeFilter) {
         return false;
       }
       return true;
@@ -41,7 +52,7 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Discover Dorms'),
+        title: const Text('Discover rentals'),
         actions: [
           IconButton(
             icon: const Icon(Icons.tune),
@@ -49,112 +60,148 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
           ),
         ],
       ),
-      body: listings.isEmpty || _currentIndex >= listings.length
+      body: allListings.isEmpty
           ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.done_all, size: 64, color: AppTheme.textSecondary),
-                  const SizedBox(height: 16),
-                  const Text(
-                    "You've reviewed all nearby dorms!",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('Check back later or adjust your budget filter.'),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () => setState(() => _currentIndex = 0),
-                    child: const Text('Reset Deck'),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.home_work_outlined,
+                        size: 64, color: AppTheme.textSecondary),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'No listings yet',
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Places posted here show up in Discover. Create the first one from My Listings.',
+                      textAlign: TextAlign.center,
+                      style:
+                          TextStyle(color: AppTheme.textSecondary, height: 1.4),
+                    ),
+                  ],
+                ),
               ),
             )
-          : Column(
-              children: [
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: _SwipeListingCard(
-                      listing: listings[_currentIndex],
-                      onPass: () {
-                        setState(() => _currentIndex++);
-                      },
-                      onLike: () {
-                        final currentListing = listings[_currentIndex];
-                        final user = ref.read(authStateProvider).valueOrNull;
-                        final studentUid = user?.uid ?? 'student_sample_1';
-                        // Record like intent in state
-                        final likesMap = ref.read(studentLikesProvider);
-                        final set = likesMap[currentListing.id] ?? {};
-                        set.add(studentUid);
-                        likesMap[currentListing.id] = set;
-                        ref.read(studentLikesProvider.notifier).state = Map.from(likesMap);
-
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Liked "${currentListing.title}"! Sent to Landlord.'),
-                            duration: const Duration(seconds: 1),
-                            backgroundColor: AppTheme.navyDark,
-                          ),
-                        );
-                        setState(() => _currentIndex++);
-                      },
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          : listings.isEmpty || _currentIndex >= listings.length
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Pass Button
-                      FloatingActionButton(
-                        heroTag: 'pass_btn',
-                        backgroundColor: Colors.white,
-                        foregroundColor: AppTheme.passRed,
-                        elevation: 4,
-                        onPressed: () {
-                          setState(() => _currentIndex++);
-                        },
-                        child: const Icon(Icons.close, size: 32),
+                      const Icon(Icons.done_all,
+                          size: 64, color: AppTheme.textSecondary),
+                      const SizedBox(height: 16),
+                      const Text(
+                        "You've reviewed every listing that matches your filters.",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 18),
                       ),
-                      // Info Button
-                      FloatingActionButton.small(
-                        heroTag: 'info_btn',
-                        backgroundColor: Colors.grey.shade100,
-                        foregroundColor: AppTheme.navyDark,
-                        elevation: 2,
-                        onPressed: () {
-                          _showListingDetailsModal(context, listings[_currentIndex]);
-                        },
-                        child: const Icon(Icons.info_outline),
-                      ),
-                      // Like Button
-                      FloatingActionButton(
-                        heroTag: 'like_btn',
-                        backgroundColor: AppTheme.primaryAmber,
-                        foregroundColor: AppTheme.navyDark,
-                        elevation: 4,
-                        onPressed: () {
-                          final currentListing = listings[_currentIndex];
-                          final user = ref.read(authStateProvider).valueOrNull;
-                          final studentUid = user?.uid ?? 'student_sample_1';
-                          final likesMap = ref.read(studentLikesProvider);
-                          final set = likesMap[currentListing.id] ?? {};
-                          set.add(studentUid);
-                          likesMap[currentListing.id] = set;
-                          ref.read(studentLikesProvider.notifier).state = Map.from(likesMap);
-
-                          setState(() => _currentIndex++);
-                        },
-                        child: const Icon(Icons.favorite, size: 32),
+                      const SizedBox(height: 8),
+                      const Text(
+                          'Check back later or widen your budget filter.'),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: () => setState(() => _currentIndex = 0),
+                        child: const Text('Reset Deck'),
                       ),
                     ],
                   ),
+                )
+              : Column(
+                  children: [
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: _SwipeListingCard(
+                          listing: listings[_currentIndex],
+                          onPass: () {
+                            setState(() => _currentIndex++);
+                          },
+                          onLike: () {
+                            final currentListing = listings[_currentIndex];
+                            final user = ref.read(authStateProvider).user;
+                            final studentUid = user?.uid;
+                            if (studentUid == null) return;
+                            // Record like intent in state
+                            final likesMap = ref.read(studentLikesProvider);
+                            final set = likesMap[currentListing.id] ?? {};
+                            set.add(studentUid);
+                            likesMap[currentListing.id] = set;
+                            ref.read(studentLikesProvider.notifier).state =
+                                Map.from(likesMap);
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                    'Liked "${currentListing.title}"! Sent to the owner.'),
+                                duration: const Duration(seconds: 1),
+                                backgroundColor: AppTheme.navyDark,
+                              ),
+                            );
+                            setState(() => _currentIndex++);
+                          },
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 40, vertical: 20),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          // Pass Button
+                          FloatingActionButton(
+                            heroTag: 'pass_btn',
+                            backgroundColor: Colors.white,
+                            foregroundColor: AppTheme.passRed,
+                            elevation: 4,
+                            onPressed: () {
+                              setState(() => _currentIndex++);
+                            },
+                            child: const Icon(Icons.close, size: 32),
+                          ),
+                          // Info Button
+                          FloatingActionButton.small(
+                            heroTag: 'info_btn',
+                            backgroundColor: Colors.grey.shade100,
+                            foregroundColor: AppTheme.navyDark,
+                            elevation: 2,
+                            onPressed: () {
+                              _showListingDetailsModal(
+                                  context, listings[_currentIndex]);
+                            },
+                            child: const Icon(Icons.info_outline),
+                          ),
+                          // Like Button
+                          FloatingActionButton(
+                            heroTag: 'like_btn',
+                            backgroundColor: AppTheme.primaryAmber,
+                            foregroundColor: AppTheme.navyDark,
+                            elevation: 4,
+                            onPressed: () {
+                              final currentListing = listings[_currentIndex];
+                              final user = ref.read(authStateProvider).user;
+                              final studentUid = user?.uid;
+                              if (studentUid == null) return;
+                              final likesMap = ref.read(studentLikesProvider);
+                              final set = likesMap[currentListing.id] ?? {};
+                              set.add(studentUid);
+                              likesMap[currentListing.id] = set;
+                              ref.read(studentLikesProvider.notifier).state =
+                                  Map.from(likesMap);
+
+                              setState(() => _currentIndex++);
+                            },
+                            child: const Icon(Icons.favorite, size: 32),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
     );
   }
 
@@ -174,7 +221,7 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Campus Discovery Filters',
+                    'Discovery Filters',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
                   ),
                   const SizedBox(height: 16),
@@ -191,7 +238,8 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
                     },
                   ),
                   const SizedBox(height: 16),
-                  const Text('Room Type:', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const Text('Room Type:',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -210,10 +258,12 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
                           selected: _selectedRoomTypeFilter == type,
                           onSelected: (selected) {
                             setSheetState(
-                              () => _selectedRoomTypeFilter = selected ? type : null,
+                              () => _selectedRoomTypeFilter =
+                                  selected ? type : null,
                             );
                             setState(
-                              () => _selectedRoomTypeFilter = selected ? type : null,
+                              () => _selectedRoomTypeFilter =
+                                  selected ? type : null,
                             );
                           },
                         ),
@@ -256,7 +306,8 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
                 children: [
                   Text(
                     listing.title,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 22),
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -268,11 +319,13 @@ class _StudentDiscoveryScreenState extends ConsumerState<StudentDiscoveryScreen>
                     ),
                   ),
                   const Divider(height: 32),
-                  const Text('Description', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text('Description',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Text(listing.description),
                   const SizedBox(height: 16),
-                  const Text('Included Amenities', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text('Included Amenities',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -306,14 +359,6 @@ class _SwipeListingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Distance from main campus gate coordinates (14.6091, 120.9899)
-    final distanceMeters = LocationUtils.calculateDistanceInMeters(
-      listing.latitude,
-      listing.longitude,
-      14.6091,
-      120.9899,
-    );
-
     return Dismissible(
       key: Key(listing.id),
       onDismissed: (direction) {
@@ -334,6 +379,12 @@ class _SwipeListingCard extends StatelessWidget {
               Image.network(
                 listing.photos.first,
                 fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  color: Colors.grey.shade300,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.image_not_supported_outlined,
+                      color: Colors.white70, size: 36),
+                ),
               )
             else
               Container(color: Colors.grey.shade300),
@@ -347,32 +398,6 @@ class _SwipeListingCard extends StatelessWidget {
                     Colors.black.withOpacity(0.1),
                     Colors.transparent,
                     Colors.black.withOpacity(0.85),
-                  ],
-                ),
-              ),
-            ),
-            // Campus Distance Badge
-            Positioned(
-              top: 16,
-              left: 16,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.directions_walk, color: AppTheme.primaryAmber, size: 16),
-                    const SizedBox(width: 4),
-                    Text(
-                      LocationUtils.formatDistance(distanceMeters),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -408,14 +433,16 @@ class _SwipeListingCard extends StatelessWidget {
                     children: listing.amenities
                         .take(3)
                         .map((a) => Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 color: Colors.white.withOpacity(0.2),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
                                 a,
-                                style: const TextStyle(color: Colors.white, fontSize: 11),
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 11),
                               ),
                             ))
                         .toList(),

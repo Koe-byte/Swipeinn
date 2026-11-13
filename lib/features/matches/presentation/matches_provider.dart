@@ -2,11 +2,12 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/match_model.dart';
 import '../data/chat_repository.dart';
-import '../../../core/services/database_service.dart';
 
-export '../data/chat_repository.dart' show chatDatabaseRepositoryProvider, ChatDatabaseRepository;
+export '../data/chat_repository.dart'
+    show chatDatabaseRepositoryProvider, ChatDatabaseRepository;
 
-final matchesProvider = StateNotifierProvider<MatchesNotifier, List<MatchModel>>((ref) {
+final matchesProvider =
+    StateNotifierProvider<MatchesNotifier, List<MatchModel>>((ref) {
   final chatRepo = ref.watch(chatDatabaseRepositoryProvider);
   return MatchesNotifier(chatRepo);
 });
@@ -14,32 +15,7 @@ final matchesProvider = StateNotifierProvider<MatchesNotifier, List<MatchModel>>
 class MatchesNotifier extends StateNotifier<List<MatchModel>> {
   final ChatDatabaseRepository _chatRepo;
 
-  MatchesNotifier(this._chatRepo) : super([]) {
-    _initSampleMatches();
-  }
-
-  void _initSampleMatches() {
-    // Synthetic participants (`student_sample_1`, `landlord_101`) are not real
-    // Firebase Auth UIDs, so Firestore security rules reject them. Only seed
-    // this demo content in local mode; real accounts start empty and build
-    // matches through the likes flow.
-    if (DatabaseService.instance.firestore != null) return;
-
-    final sampleMatch = MatchModel(
-      id: 'listing_01_student_sample_1',
-      listingId: 'listing_01',
-      landlordUid: 'landlord_101',
-      studentUid: 'student_sample_1',
-      status: MatchStatus.active,
-      matchedAt: DateTime.now().subtract(const Duration(hours: 4)),
-      expiresAt: DateTime.now().add(const Duration(hours: 20)),
-      messagesCount: 1,
-      viewingStatus: ViewingStatus.proposed,
-      viewingDate: DateTime.now().add(const Duration(days: 2)),
-    );
-    state = [sampleMatch];
-    _chatRepo.saveMatch(sampleMatch);
-  }
+  MatchesNotifier(this._chatRepo) : super([]);
 
   // Create deterministic bilateral match: ${listingId}_${studentUid}
   void createBilateralMatch({
@@ -80,7 +56,8 @@ class MatchesNotifier extends StateNotifier<List<MatchModel>> {
     }).toList();
   }
 
-  void updateViewingStatus(String matchId, ViewingStatus status, [DateTime? date]) {
+  void updateViewingStatus(String matchId, ViewingStatus status,
+      [DateTime? date]) {
     state = state.map((m) {
       if (m.id == matchId) {
         final updated = m.copyWith(viewingStatus: status, viewingDate: date);
@@ -104,7 +81,9 @@ class MatchesNotifier extends StateNotifier<List<MatchModel>> {
 }
 
 // Active messages stream per match
-final messagesProvider = StateNotifierProvider.family<MessagesNotifier, List<MessageModel>, String>((ref, matchId) {
+final messagesProvider =
+    StateNotifierProvider.family<MessagesNotifier, List<MessageModel>, String>(
+        (ref, matchId) {
   final chatRepo = ref.watch(chatDatabaseRepositoryProvider);
   return MessagesNotifier(matchId, chatRepo);
 });
@@ -119,32 +98,6 @@ class MessagesNotifier extends StateNotifier<List<MessageModel>> {
   }
 
   void _initMessages() {
-    if (matchId == 'listing_01_student_sample_1' &&
-        DatabaseService.instance.firestore == null) {
-      final initialSample = [
-        MessageModel(
-          id: 'msg_1',
-          senderUid: 'student_sample_1',
-          text: 'Hi! I am looking for a November move-in—when can I view the unit?',
-          type: MessageType.text,
-          sentAt: DateTime.now().subtract(const Duration(hours: 3)),
-        ),
-        MessageModel(
-          id: 'msg_2',
-          senderUid: 'student_sample_1',
-          text: 'In-person inspection requested',
-          type: MessageType.viewingProposal,
-          proposalStatus: 'pending',
-          viewingDate: DateTime.now().add(const Duration(days: 2, hours: 2)),
-          sentAt: DateTime.now().subtract(const Duration(hours: 2)),
-        ),
-      ];
-      state = initialSample;
-      for (final m in initialSample) {
-        _chatRepo.saveMessage(matchId, m);
-      }
-    }
-
     _sub = _chatRepo.streamMessages(matchId).listen((messages) {
       if (messages.isNotEmpty) {
         state = messages;
@@ -173,7 +126,8 @@ class MessagesNotifier extends StateNotifier<List<MessageModel>> {
     await _chatRepo.saveMessage(matchId, msg);
   }
 
-  Future<void> updateProposalStatus(String msgId, String newStatus, [DateTime? date]) async {
+  Future<void> updateProposalStatus(String msgId, String newStatus,
+      [DateTime? date]) async {
     state = state.map((m) {
       if (m.id == msgId) {
         return MessageModel(

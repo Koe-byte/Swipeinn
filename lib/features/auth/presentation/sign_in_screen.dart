@@ -41,19 +41,37 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       return;
     }
     FocusScope.of(context).unfocus();
-    await ref.read(authStateProvider.notifier).signInWithEmail(
+    await ref.read(authStateProvider.notifier).signIn(
           email: email,
           password: password,
         );
   }
 
+  Future<void> _resetPassword() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Enter your email first, then tap Forgot password.')),
+      );
+      return;
+    }
+    final sent =
+        await ref.read(authStateProvider.notifier).sendPasswordReset(email);
+    if (sent) return; // Success is shown by the info banner above.
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'Could not send the reset link. Check the address and try again.'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authStateProvider);
-    final isLoading = authState.isLoading;
-    final error = authState.hasError && authState.error is! ProfileSetupRequired
-        ? authState.error
-        : null;
+    final isLoading = authState.isSubmitting;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -65,139 +83,109 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         title: const Text('Sign In'),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 8),
-              const Text(
-                'Welcome back',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.navyDark,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Sign in to pick up where you left off. Your role and preferences are loaded from your profile.',
-                style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
-              ),
-              const SizedBox(height: 24),
-              if (error != null) AuthErrorBanner(message: authErrorMessage(error)),
-              TextField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                autofillHints: const [AutofillHints.email],
-                textInputAction: TextInputAction.next,
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                autofillHints: const [AutofillHints.password],
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => _signIn(),
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                    ),
-                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                key: const Key('sign_in_submit'),
-                onPressed: isLoading ? null : _signIn,
-                child: isLoading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.navyDark),
-                      )
-                    : const Text('Sign In'),
-              ),
-              const SizedBox(height: 20),
-              const AuthOrDivider(label: 'or continue with'),
-              const SizedBox(height: 16),
-              _OAuthButtons(
-                enabled: !isLoading,
-                onGoogle: () => ref.read(authStateProvider.notifier).signInWithGoogle(),
-                onFacebook: () => ref.read(authStateProvider.notifier).signInWithFacebook(),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('New to Swipeinn?', style: TextStyle(color: AppTheme.textSecondary)),
-                  TextButton(
-                    onPressed: isLoading ? null : widget.onCreateAccount,
-                    child: const Text('Create account'),
+                  const Text(
+                    'Welcome back',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.navyDark,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Sign in to pick up where you left off.',
+                    style:
+                        TextStyle(color: AppTheme.textSecondary, height: 1.4),
+                  ),
+                  const SizedBox(height: 24),
+                  if (authState.errorMessage != null)
+                    AuthErrorBanner(message: authState.errorMessage!),
+                  if (authState.infoMessage != null)
+                    AuthInfoBanner(message: authState.infoMessage!),
+                  TextField(
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.email],
+                    textInputAction: TextInputAction.next,
+                    decoration: InputDecoration(
+                      labelText: 'Email',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _passwordController,
+                    obscureText: _obscurePassword,
+                    autofillHints: const [AutofillHints.password],
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _signIn(),
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                        onPressed: () => setState(
+                            () => _obscurePassword = !_obscurePassword),
+                      ),
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: isLoading ? null : _resetPassword,
+                      child: const Text('Forgot password?'),
+                    ),
+                  ),
+                  ElevatedButton(
+                    key: const Key('sign_in_submit'),
+                    onPressed: isLoading ? null : _signIn,
+                    child: isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppTheme.navyDark,
+                            ),
+                          )
+                        : const Text('Sign In'),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'New to Swipeinn?',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                      TextButton(
+                        onPressed: isLoading ? null : widget.onCreateAccount,
+                        child: const Text('Create account'),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),
-    );
-  }
-}
-
-class _OAuthButtons extends StatelessWidget {
-  final bool enabled;
-  final VoidCallback onGoogle;
-  final VoidCallback onFacebook;
-
-  const _OAuthButtons({
-    required this.enabled,
-    required this.onGoogle,
-    required this.onFacebook,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        OutlinedButton.icon(
-          onPressed: enabled ? onGoogle : null,
-          icon: Container(
-            width: 22,
-            height: 22,
-            alignment: Alignment.center,
-            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-            child: const Text('G', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w900)),
-          ),
-          label: const Text('Continue with Google'),
-          style: OutlinedButton.styleFrom(
-            side: BorderSide(color: Colors.grey.shade300, width: 1.5),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            foregroundColor: AppTheme.navyDark,
-          ),
-        ),
-        const SizedBox(height: 10),
-        ElevatedButton.icon(
-          onPressed: enabled ? onFacebook : null,
-          icon: const Icon(Icons.facebook, size: 22, color: Colors.white),
-          label: const Text('Continue with Facebook'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1877F2),
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-          ),
-        ),
-      ],
     );
   }
 }
