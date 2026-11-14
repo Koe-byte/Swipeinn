@@ -8,6 +8,20 @@ enum ListingStatus {
   full,
 }
 
+/// Amenities the publish/edit form offers. Stored as free-form strings, so the
+/// list can grow without a schema change.
+const List<String> listingAmenityOptions = [
+  'Wi-Fi',
+  'Aircon',
+  'Water included',
+  'Furnished',
+  'Parking',
+  'Laundry area',
+  'Kitchen',
+  'Private CR',
+  'Pet friendly',
+];
+
 /// A place an account has published. Any account can own listings; there is no
 /// separate owner account type.
 class ListingModel {

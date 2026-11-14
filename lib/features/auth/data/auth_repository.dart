@@ -42,6 +42,10 @@ abstract class AuthRepository {
   Future<UserModel?> fetchProfile(String uid);
 
   Future<void> saveProfile(UserModel user);
+
+  /// Renames the account in Firebase Auth and mirrors the new name onto the
+  /// profile document.
+  Future<void> updateDisplayName(String displayName);
 }
 
 class FirebaseAuthRepository implements AuthRepository {
@@ -151,6 +155,23 @@ class FirebaseAuthRepository implements AuthRepository {
         .collection('users')
         .doc(user.uid)
         .set(map, SetOptions(merge: true));
+  }
+
+  @override
+  Future<void> updateDisplayName(String displayName) async {
+    final name = displayName.trim();
+    if (name.isEmpty) {
+      throw ArgumentError.value(displayName, 'displayName', 'Cannot be empty');
+    }
+    final user = _auth.currentUser;
+    if (user == null) throw StateError('No signed-in user to rename.');
+
+    await user.updateDisplayName(name);
+
+    final profile = await fetchProfile(user.uid);
+    if (profile != null) {
+      await saveProfile(profile.copyWith(displayName: name));
+    }
   }
 
   static AuthIdentity _toIdentity(User user) {

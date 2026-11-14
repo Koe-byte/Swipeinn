@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../auth/domain/user_model.dart';
 import '../../auth/presentation/auth_landing_screen.dart';
 import '../../auth/presentation/auth_provider.dart';
 import '../../auth/presentation/preferences_onboarding_screen.dart';
@@ -11,6 +9,7 @@ import '../../auth/presentation/verify_email_screen.dart';
 import '../../listings/presentation/landlord_studio_screen.dart';
 import '../../listings/presentation/student_discovery_screen.dart';
 import '../../matches/presentation/matches_screen.dart';
+import '../../profile/presentation/profile_screen.dart';
 
 final navigationIndexProvider = StateProvider<int>((ref) => 0);
 
@@ -60,7 +59,10 @@ class _AccountShell extends ConsumerWidget {
     ];
 
     return Scaffold(
-      body: pages[selectedIndex],
+      body: IndexedStack(
+        index: selectedIndex,
+        children: pages,
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         onDestinationSelected: (index) =>
@@ -87,136 +89,6 @@ class _AccountShell extends ConsumerWidget {
             label: 'Profile',
           ),
         ],
-      ),
-    );
-  }
-}
-
-class ProfileScreen extends ConsumerWidget {
-  const ProfileScreen({Key? key}) : super(key: key);
-
-  String _budgetLabel(RenterPreferences preferences) {
-    final pesos = NumberFormat.decimalPattern();
-    return '₱${pesos.format(preferences.budgetMin)} – '
-        '₱${pesos.format(preferences.budgetMax)} / month';
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(authStateProvider).user;
-    final preferences = user?.preferences;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: CircleAvatar(
-                radius: 44,
-                backgroundColor: AppTheme.primaryAmber,
-                child: Text(
-                  user?.displayName.isNotEmpty == true
-                      ? user!.displayName[0].toUpperCase()
-                      : 'S',
-                  style: const TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.navyDark,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Flexible(
-                  child: Text(
-                    user?.displayName ?? 'Swipeinn user',
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                if (user?.isOwnerVerified == true) ...[
-                  const SizedBox(width: 6),
-                  const Icon(Icons.verified,
-                      color: AppTheme.verifiedBlue, size: 20),
-                ],
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              user?.email ?? '',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.textSecondary),
-            ),
-            if (user?.isOwnerVerified == true) ...[
-              const SizedBox(height: 8),
-              const Center(
-                child: Chip(
-                  avatar: Icon(Icons.workspace_premium, size: 16),
-                  label: Text('Verified owner'),
-                ),
-              ),
-            ],
-            const SizedBox(height: 24),
-            const Text(
-              'Your preferences',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            const SizedBox(height: 8),
-            if (preferences == null)
-              const Text(
-                'Not set yet.',
-                style: TextStyle(color: AppTheme.textSecondary),
-              )
-            else ...[
-              ListTile(
-                leading: const Icon(Icons.home_work_outlined,
-                    color: AppTheme.navyDark),
-                title: const Text('Property types'),
-                subtitle: Text(
-                  preferences.propertyTypes
-                      .map((type) => type.label)
-                      .join(', '),
-                ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.payments_outlined,
-                    color: AppTheme.navyDark),
-                title: const Text('Monthly budget'),
-                subtitle: Text(_budgetLabel(preferences)),
-              ),
-              ListTile(
-                leading:
-                    const Icon(Icons.place_outlined, color: AppTheme.navyDark),
-                title: const Text('Preferred areas'),
-                subtitle: Text(
-                  preferences.areas.isEmpty
-                      ? 'Anywhere'
-                      : preferences.areas.join(', '),
-                ),
-              ),
-              ListTile(
-                leading:
-                    const Icon(Icons.event_outlined, color: AppTheme.navyDark),
-                title: const Text('Move-in window'),
-                subtitle: Text(preferences.moveInWindow.label),
-              ),
-            ],
-            const SizedBox(height: 24),
-            OutlinedButton(
-              onPressed: () => ref.read(authStateProvider.notifier).signOut(),
-              child: const Text('Sign Out'),
-            ),
-          ],
-        ),
       ),
     );
   }

@@ -11,7 +11,12 @@ import 'auth_ui.dart';
 /// Step 1 tunes the feed by property type and budget; step 2 by area and
 /// move-in timing.
 class PreferencesOnboardingScreen extends ConsumerStatefulWidget {
-  const PreferencesOnboardingScreen({Key? key}) : super(key: key);
+  /// When true the same two-step form edits existing answers from the profile
+  /// screen instead of gating a first-time account.
+  final bool editing;
+
+  const PreferencesOnboardingScreen({Key? key, this.editing = false})
+      : super(key: key);
 
   @override
   ConsumerState<PreferencesOnboardingScreen> createState() =>
@@ -81,7 +86,16 @@ class _PreferencesOnboardingScreenState
     );
 
     FocusScope.of(context).unfocus();
-    await ref.read(authStateProvider.notifier).completeOnboarding(preferences);
+    final notifier = ref.read(authStateProvider.notifier);
+
+    if (!widget.editing) {
+      await notifier.completeOnboarding(preferences);
+      return;
+    }
+
+    final saved = await notifier.updatePreferences(preferences);
+    if (!mounted || !saved) return;
+    Navigator.of(context).pop(true);
   }
 
   @override
@@ -92,15 +106,16 @@ class _PreferencesOnboardingScreenState
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: const Text('Your preferences'),
+        automaticallyImplyLeading: widget.editing,
+        title: Text(widget.editing ? 'Edit preferences' : 'Your preferences'),
         actions: [
-          TextButton(
-            onPressed: state.isSubmitting
-                ? null
-                : ref.read(authStateProvider.notifier).signOut,
-            child: const Text('Sign out'),
-          ),
+          if (!widget.editing)
+            TextButton(
+              onPressed: state.isSubmitting
+                  ? null
+                  : ref.read(authStateProvider.notifier).signOut,
+              child: const Text('Sign out'),
+            ),
         ],
       ),
       body: SafeArea(
@@ -271,7 +286,7 @@ class _PreferencesOnboardingScreenState
                   color: AppTheme.navyDark,
                 ),
               )
-            : const Text('Start browsing'),
+            : Text(widget.editing ? 'Save preferences' : 'Start browsing'),
       ),
       const SizedBox(height: 8),
       TextButton(

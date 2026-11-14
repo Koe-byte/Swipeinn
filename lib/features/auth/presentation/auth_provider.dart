@@ -285,6 +285,63 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Updates onboarding answers from the profile screen. Unlike
+  /// [completeOnboarding] this never changes the gate status: the account was
+  /// already ready.
+  Future<bool> updatePreferences(RenterPreferences preferences) async {
+    final current = state.user;
+    if (current == null) return false;
+
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    final updated = current.copyWith(
+      preferences: preferences,
+      hasCompletedOnboarding: true,
+    );
+
+    try {
+      await _repo.saveProfile(updated);
+      state = state.copyWith(
+        user: updated,
+        status: AuthStatus.ready,
+        isSubmitting: false,
+      );
+      return true;
+    } catch (error) {
+      debugPrint('[Auth] Preferences update failed: $error');
+      state = state.copyWith(
+        isSubmitting: false,
+        errorMessage:
+            'Could not save your preferences. Check your connection and try again.',
+      );
+      return false;
+    }
+  }
+
+  /// Renames the account. The UI updates immediately, then rolls back if the
+  /// write fails so the profile never shows a name Firebase did not accept.
+  Future<bool> updateDisplayName(String displayName) async {
+    final current = state.user;
+    final name = displayName.trim();
+    if (current == null || name.isEmpty) return false;
+    if (name == current.displayName) return true;
+
+    final updated = current.copyWith(displayName: name);
+    state = state.copyWith(user: updated, clearError: true);
+
+    try {
+      await _repo.updateDisplayName(name);
+      return true;
+    } catch (error) {
+      debugPrint('[Auth] Display name update failed: $error');
+      state = state.copyWith(
+        user: current,
+        errorMessage:
+            'Could not update your name. Check your connection and try again.',
+      );
+      return false;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Session
   // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:swipeinn/core/navigation/app_router.dart';
 import 'package:swipeinn/core/services/database_service.dart';
 import 'package:swipeinn/features/auth/domain/user_model.dart';
 import 'package:swipeinn/features/auth/presentation/auth_provider.dart';
@@ -73,14 +74,17 @@ Widget _appWith(
       matchesRepositoryProvider
           .overrideWithValue(matches ?? FakeMatchesRepository()),
     ],
-    child: const MaterialApp(home: MainNavigationShell()),
+    child: MaterialApp(
+      onGenerateRoute: AppRouter.onGenerateRoute,
+      home: const MainNavigationShell(),
+    ),
   );
 }
 
 /// Advances the frame a few times without `pumpAndSettle`, because the splash
 /// and submit states contain looping progress indicators.
 Future<void> _advance(WidgetTester tester) async {
-  for (var i = 0; i < 4; i++) {
+  for (var i = 0; i < 5; i++) {
     await tester.pump(const Duration(milliseconds: 100));
   }
 }
@@ -230,13 +234,14 @@ void main() {
     await _advance(tester);
     expect(find.text('Publish New Listing Card'), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField).at(0), 'Lahug Studio');
-    await tester.enterText(find.byType(TextField).at(2), '6500');
+    await tester.enterText(
+        find.byKey(const Key('listing_title')), 'Lahug Studio');
+    await tester.enterText(find.byKey(const Key('listing_rent')), '6500');
     await tester.pump();
     await tester.ensureVisible(find.text('Publish Listing Card'));
     await tester.pump();
     await tester.tap(find.text('Publish Listing Card'));
-    await _advance(tester);
+    await tester.pumpAndSettle();
 
     expect(find.text('Publish New Listing Card'), findsNothing);
     expect(find.text('No listings published yet.'), findsNothing);
@@ -252,6 +257,7 @@ void main() {
     expect(find.text('YOUR LISTING'), findsOneWidget);
 
     // Liking your own place must not create a self-match.
+    await _drainSnackbars(tester);
     await tester.tap(find.byIcon(Icons.favorite));
     await _advance(tester);
     expect(listings.likes, isEmpty);
@@ -386,6 +392,191 @@ void main() {
           .any((message) => message.text == 'Saturday morning works.'),
       isTrue,
     );
+    await _drainSnackbars(tester);
+  });
+
+  testWidgets('tapping a listing card opens the full detail screen',
+      (tester) async {
+    final fake = FakeAuthRepository(
+      initialIdentity: _identity,
+      initialProfile: _completeProfile,
+    );
+    final listings = FakeListingsRepository()
+      ..seedListing(_listing(id: 'listing-2', ownerUid: 'uid-2'));
+
+    await tester.pumpWidget(_appWith(fake, listings: listings));
+    await _advance(tester);
+
+    await tester.tap(find.text('Lahug Studio'));
+    await _advance(tester);
+
+    expect(find.text('Listing details'), findsOneWidget);
+    expect(find.text('About this place'), findsOneWidget);
+    expect(find.textContaining('₱6500 / month'), findsOneWidget);
+    expect(find.byKey(const Key('listing_interest')), findsOneWidget);
+    expect(find.byKey(const Key('listing_edit')), findsNothing);
+
+    await tester.pageBack();
+    await _advance(tester);
+    await _drainSnackbars(tester);
+  });
+
+  testWidgets('interest sent from the detail screen reaches the owner queue',
+      (tester) async {
+    final fake = FakeAuthRepository(
+      initialIdentity: _identity,
+      initialProfile: _completeProfile,
+    );
+    final listings = FakeListingsRepository()
+      ..seedListing(_listing(id: 'listing-2', ownerUid: 'uid-2'));
+
+    await tester.pumpWidget(_appWith(fake, listings: listings));
+    await _advance(tester);
+
+    await tester.tap(find.text('Lahug Studio'));
+    await _advance(tester);
+    await tester.tap(find.byKey(const Key('listing_interest')));
+    await tester.pumpAndSettle();
+
+    final like = listings.likes['listing-2']?['uid-1'];
+    expect(like, isNotNull);
+    expect(like?.status, LikeStatus.pending);
+
+    // The detail screen closes and the deck advances, matching a right swipe.
+    expect(find.text('Listing details'), findsNothing);
+    expect(
+      find.text("You've reviewed every listing that matches your filters."),
+      findsOneWidget,
+    );
+    await _drainSnackbars(tester);
+  });
+
+  testWidgets('the owner can edit a listing from its detail screen',
+      (tester) async {
+    final fake = FakeAuthRepository(
+      initialIdentity: _identity,
+      initialProfile: _completeProfile,
+    );
+    final listings = FakeListingsRepository()..seedListing(_listing());
+
+    await tester.pumpWidget(_appWith(fake, listings: listings));
+    await _advance(tester);
+
+    await tester.tap(find.text('My Listings'));
+    await _advance(tester);
+    await tester.tap(find.text('Lahug Studio'));
+    await _advance(tester);
+
+    expect(
+        find.text('This is your listing. Interest from other accounts shows '
+            'up in the Review Queue.'),
+        findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('listing_edit')));
+    await _advance(tester);
+
+    expect(find.text('Edit listing'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('listing_title')),
+      'Lahug Studio Deluxe',
+    );
+    await tester.enterText(find.byKey(const Key('listing_rent')), '7200');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('listing_save')));
+    await tester.pumpAndSettle();
+
+    final saved = listings.listings['listing-1'];
+    expect(saved?.title, 'Lahug Studio Deluxe');
+    expect(saved?.monthlyRent, 7200);
+    expect(find.text('Lahug Studio Deluxe'), findsOneWidget);
+    expect(find.textContaining('₱7200 / month'), findsOneWidget);
+
+    await _drainSnackbars(tester);
+  });
+
+  testWidgets('the owner can delete a listing after confirming',
+      (tester) async {
+    final fake = FakeAuthRepository(
+      initialIdentity: _identity,
+      initialProfile: _completeProfile,
+    );
+    final listings = FakeListingsRepository()..seedListing(_listing());
+
+    await tester.pumpWidget(_appWith(fake, listings: listings));
+    await _advance(tester);
+
+    await tester.tap(find.text('My Listings'));
+    await _advance(tester);
+    await tester.tap(find.text('Lahug Studio'));
+    await _advance(tester);
+
+    await tester.tap(find.byKey(const Key('listing_delete')));
+    await _advance(tester);
+    expect(find.text('Delete listing?'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('listing_delete_confirm')));
+    await tester.pumpAndSettle();
+
+    expect(listings.listings.containsKey('listing-1'), isFalse);
+    expect(find.text('Listing details'), findsNothing);
+    expect(find.text('No listings published yet.'), findsOneWidget);
+    await _drainSnackbars(tester);
+  });
+
+  testWidgets('the profile screen renames the account', (tester) async {
+    final fake = FakeAuthRepository(
+      initialIdentity: _identity,
+      initialProfile: _completeProfile,
+    );
+
+    await tester.pumpWidget(_appWith(fake));
+    await _advance(tester);
+
+    await tester.tap(find.text('Profile'));
+    await _advance(tester);
+
+    await tester.tap(find.byKey(const Key('profile_edit_name')));
+    await _advance(tester);
+    await tester.enterText(
+      find.byKey(const Key('profile_name_field')),
+      'Maria Santos',
+    );
+    await tester.tap(find.byKey(const Key('profile_name_save')));
+    await _advance(tester);
+
+    expect(fake.profile?.displayName, 'Maria Santos');
+    expect(find.text('Maria Santos'), findsOneWidget);
+    await _drainSnackbars(tester);
+  });
+
+  testWidgets('preferences can be edited from the profile', (tester) async {
+    final fake = FakeAuthRepository(
+      initialIdentity: _identity,
+      initialProfile: _completeProfile,
+    );
+
+    await tester.pumpWidget(_appWith(fake));
+    await _advance(tester);
+
+    await tester.tap(find.text('Profile'));
+    await _advance(tester);
+    await tester.tap(find.byKey(const Key('profile_edit_prefs')));
+    await _advance(tester);
+
+    expect(find.text('Edit preferences'), findsOneWidget);
+    expect(find.text('Step 1 of 2'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilterChip, 'Apartment'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('prefs_next')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('prefs_finish')));
+    await _advance(tester);
+
+    final saved = fake.profile?.preferences;
+    expect(saved?.propertyTypes, contains(PropertyType.studio));
+    expect(saved?.propertyTypes, contains(PropertyType.apartment));
+    expect(find.text('Preferences updated.'), findsOneWidget);
     await _drainSnackbars(tester);
   });
 }

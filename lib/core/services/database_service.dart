@@ -249,6 +249,36 @@ class DatabaseService {
     }
   }
 
+  /// Removes a document locally and in Firestore. Returns `false` when the
+  /// cloud delete could not be confirmed, so callers can tell the person the
+  /// change may not have reached other devices.
+  Future<bool> deleteDocument({
+    required String collection,
+    required String docId,
+  }) async {
+    _localCollections[collection]?.remove(docId);
+    _notifyDoc(collection, docId);
+    _notifyCollection(collection);
+    unawaited(_persistCollection(collection));
+
+    final fs = firestore;
+    if (fs == null) return true;
+    try {
+      await fs
+          .collection(collection)
+          .doc(docId)
+          .delete()
+          .timeout(const Duration(seconds: 3));
+      return true;
+    } catch (e) {
+      debugPrint(
+        '[DatabaseService] Cloud Firestore delete failed for '
+        '$collection/$docId; removed from the local cache only: $e',
+      );
+      return false;
+    }
+  }
+
   Future<Map<String, dynamic>?> getDocument({
     required String collection,
     required String docId,

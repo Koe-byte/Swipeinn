@@ -54,6 +54,16 @@ class FakeListingsRepository implements ListingsRepository {
   }
 
   @override
+  Stream<ListingModel?> watchListing(String listingId) async* {
+    ListingModel? current() => listings[listingId];
+
+    yield current();
+    await for (final _ in _listingsController.stream) {
+      yield current();
+    }
+  }
+
+  @override
   Stream<List<ListingLike>> watchPendingLikes(String listingId) async* {
     List<ListingLike> pending() {
       final queue = likes[listingId]?.values ?? const <ListingLike>[];
@@ -81,6 +91,19 @@ class FakeListingsRepository implements ListingsRepository {
     if (existing == null) return;
     listings[listingId] = existing.copyWith(status: status);
     _listingsController.add(null);
+  }
+
+  @override
+  Future<void> updateListing(ListingModel listing) async {
+    listings[listing.id] = listing;
+    _listingsController.add(null);
+  }
+
+  @override
+  Future<bool> deleteListing(String listingId) async {
+    listings.remove(listingId);
+    _listingsController.add(null);
+    return true;
   }
 
   @override

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/listing_model.dart';
 import 'listings_provider.dart';
+import '../../../core/navigation/route_names.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_provider.dart';
 
@@ -118,6 +119,8 @@ class _StudentDiscoveryScreenState
                               listing: listings[_currentIndex],
                               isMine: listings[_currentIndex].ownerUid ==
                                   currentUid,
+                              onTap: () =>
+                                  _openListing(listings[_currentIndex]),
                               onPass: () {
                                 setState(() => _currentIndex++);
                               },
@@ -151,10 +154,8 @@ class _StudentDiscoveryScreenState
                                 backgroundColor: Colors.grey.shade100,
                                 foregroundColor: AppTheme.navyDark,
                                 elevation: 2,
-                                onPressed: () {
-                                  _showListingDetailsModal(
-                                      context, listings[_currentIndex]);
-                                },
+                                onPressed: () =>
+                                    _openListing(listings[_currentIndex]),
                                 child: const Icon(Icons.info_outline),
                               ),
                               // Like Button
@@ -186,6 +187,17 @@ class _StudentDiscoveryScreenState
         ),
       ),
     );
+  }
+
+  Future<void> _openListing(ListingModel listing) async {
+    final liked = await Navigator.of(context).pushNamed<bool>(
+      AppRoutes.listingDetail,
+      arguments: ListingDetailArgs(listingId: listing.id),
+    );
+    // The detail screen pops with `true` when the person expresses interest,
+    // which is the same outcome as a right swipe.
+    if (!mounted || liked != true) return;
+    setState(() => _currentIndex++);
   }
 
   Future<void> _likeListing(ListingModel listing) async {
@@ -294,78 +306,19 @@ class _StudentDiscoveryScreenState
       },
     );
   }
-
-  void _showListingDetailsModal(BuildContext context, ListingModel listing) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          maxChildSize: 0.9,
-          minChildSize: 0.4,
-          expand: false,
-          builder: (ctx, scrollController) {
-            return SingleChildScrollView(
-              controller: scrollController,
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    listing.title,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 22),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '₱${listing.monthlyRent.toStringAsFixed(0)} / month',
-                    style: const TextStyle(
-                      color: AppTheme.primaryDarkAmber,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Divider(height: 32),
-                  const Text('Description',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Text(listing.description),
-                  const SizedBox(height: 16),
-                  const Text('Included Amenities',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: listing.amenities
-                        .map((a) => Chip(
-                              label: Text(a),
-                              backgroundColor: Colors.amber.shade50,
-                            ))
-                        .toList(),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 }
 
 class _SwipeListingCard extends StatelessWidget {
   final ListingModel listing;
   final bool isMine;
+  final VoidCallback onTap;
   final VoidCallback onPass;
   final VoidCallback onLike;
 
   const _SwipeListingCard({
     required this.listing,
     required this.isMine,
+    required this.onTap,
     required this.onPass,
     required this.onLike,
   });
@@ -480,10 +433,16 @@ class _SwipeListingCard extends StatelessWidget {
       ),
     );
 
-    // Swiping your own card would trigger the like callback and be immediately
-    // undone by the owner check, which looks like a broken gesture. Preview it
-    // without the swipe layer instead.
-    if (isMine) return card;
+    // A tap opens the full listing. Swiping your own card would trigger the
+    // like callback and be immediately undone by the owner check, so own cards
+    // are previewed without the swipe layer instead.
+    final tappable = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: card,
+    );
+
+    if (isMine) return tappable;
 
     return Dismissible(
       key: Key(listing.id),
@@ -494,7 +453,7 @@ class _SwipeListingCard extends StatelessWidget {
           onLike();
         }
       },
-      child: card,
+      child: tappable,
     );
   }
 }

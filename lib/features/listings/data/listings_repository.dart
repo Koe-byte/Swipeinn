@@ -15,12 +15,21 @@ abstract class ListingsRepository {
 
   Stream<List<ListingModel>> watchListingsByOwner(String ownerUid);
 
+  /// One listing by ID, kept live. Emits `null` when the document is gone.
+  Stream<ListingModel?> watchListing(String listingId);
+
   /// Interest that has not been approved yet, oldest first.
   Stream<List<ListingLike>> watchPendingLikes(String listingId);
 
   Future<void> publish(ListingModel listing);
 
+  /// Applies owner edits without replacing fields the editor did not touch.
+  Future<void> updateListing(ListingModel listing);
+
   Future<void> updateStatus(String listingId, ListingStatus status);
+
+  /// Returns `false` when the cloud delete could not be confirmed.
+  Future<bool> deleteListing(String listingId);
 
   Future<void> like({
     required String listingId,
@@ -68,6 +77,17 @@ class FirestoreListingsRepository implements ListingsRepository {
   }
 
   @override
+  Stream<ListingModel?> watchListing(String listingId) {
+    return _db
+        .streamDocument(collection: 'listings', docId: listingId)
+        .map((map) {
+      if (map == null) return null;
+      final listing = ListingModel.fromMap(map, listingId);
+      return listing.id.isEmpty ? null : listing;
+    });
+  }
+
+  @override
   Stream<List<ListingLike>> watchPendingLikes(String listingId) {
     return _db
         .streamSubcollection(
@@ -104,6 +124,18 @@ class FirestoreListingsRepository implements ListingsRepository {
   }
 
   @override
+  Future<void> updateListing(ListingModel listing) async {
+    await _db.setDocument(
+      collection: 'listings',
+      docId: listing.id,
+      data: {
+        ...listing.toMap(),
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+      },
+    );
+  }
+
+  @override
   Future<void> updateStatus(String listingId, ListingStatus status) async {
     await _db.setDocument(
       collection: 'listings',
@@ -113,6 +145,11 @@ class FirestoreListingsRepository implements ListingsRepository {
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       },
     );
+  }
+
+  @override
+  Future<bool> deleteListing(String listingId) {
+    return _db.deleteDocument(collection: 'listings', docId: listingId);
   }
 
   @override

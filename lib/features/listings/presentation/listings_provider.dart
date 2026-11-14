@@ -24,3 +24,9 @@ final pendingLikesProvider =
     StreamProvider.family<List<ListingLike>, String>((ref, listingId) {
   return ref.watch(listingsRepositoryProvider).watchPendingLikes(listingId);
 });
+
+/// One live listing, used by the detail and editor screens.
+final listingProvider =
+    StreamProvider.family<ListingModel?, String>((ref, listingId) {
+  return ref.watch(listingsRepositoryProvider).watchListing(listingId);
+});

@@ -125,6 +125,25 @@ class FakeAuthRepository implements AuthRepository {
     profile = user;
   }
 
+  @override
+  Future<void> updateDisplayName(String displayName) async {
+    final current = profile;
+    if (current == null) throw StateError('No signed-in user to rename.');
+
+    final name = displayName.trim();
+    profile = current.copyWith(displayName: name);
+
+    final identity = _current;
+    if (identity != null) {
+      _current = AuthIdentity(
+        uid: identity.uid,
+        email: identity.email,
+        displayName: name,
+        isEmailVerified: identity.isEmailVerified,
+      );
+    }
+  }
+
   void dispose() {
     _controller.close();
   }

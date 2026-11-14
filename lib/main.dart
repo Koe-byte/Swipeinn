@@ -2,6 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/navigation/app_router.dart';
 import 'core/services/database_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/navigation/presentation/main_navigation_shell.dart';
@@ -42,6 +43,7 @@ class SwipeinnApp extends StatelessWidget {
       title: 'Swipeinn',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+      onGenerateRoute: AppRouter.onGenerateRoute,
       home: startupError == null
           ? const MainNavigationShell()
           : _StartupFailureScreen(details: startupError!),
