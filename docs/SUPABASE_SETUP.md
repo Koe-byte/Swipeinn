@@ -111,11 +111,12 @@ Full detail is in `supabase/migrations/0002_security.sql`. In short:
 - `users` — owner-only read/write.
 - `listings` — readable by any signed-in account, writable by the verified owner.
 - `listing_likes` — the requester sees their own row, the listing owner sees the
-  queue; only the owner may approve, and only `status`/`approvedAt` are grantable.
+  queue; only the owner may approve, and a trigger keeps the requester fields
+  immutable.
 - `matches` — participants only; creation requires an existing like on the
   owner's own listing; participant columns are frozen by a trigger.
-- `messages` — participants only; the sender must be the writer; after creation
-  only `proposalStatus` and `viewingDate` can be updated.
+- `messages` — participants only; the sender must be the writer; a trigger keeps
+  message content immutable, so only `proposalStatus` and `viewingDate` move.
 
 `is_verified()` reads `auth.users.email_confirmed_at` because the JWT carries no
 `email_verified` claim. If every write suddenly returns permission-denied for a

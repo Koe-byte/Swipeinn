@@ -41,13 +41,13 @@ translations were not mechanical:
   claim, so `public.is_verified()` is a `security definer` function reading
   `auth.users.email_confirmed_at`.
 - Firestore expressed "only these columns may change" with
-  `affectedKeys().hasOnly([...])`. Postgres expresses it with column-level
-  `GRANT UPDATE` for likes, where only `status` and `approvedAt` are writable.
-  Matches and messages need a `before update` trigger instead: a policy's
-  `WITH CHECK` only sees the new row, and a column grant cannot be used for
-  messages because the client sends a whole-row merge (Postgres checks the grant
-  before it checks whether any row matched). The triggers freeze match
-  participants and message content.
+  `affectedKeys().hasOnly([...])`. Postgres can express that with column-level
+  `GRANT UPDATE`, but the client writes rows through a merge (UPDATE, then
+  INSERT when absent), and Postgres checks column privileges before it knows
+  whether any row matched — so a partial grant rejects even the first insert.
+  The equivalent is a `before update` trigger per table: one freezes a like's
+  requester fields, one freezes match participants, one freezes message content.
+  The approval fields and the viewing-proposal fields remain writable.
 
 Writes are default-deny: RLS is on for every table, and `anon` holds no grants.
 The client ships a publishable key, which is fine — RLS is the boundary.

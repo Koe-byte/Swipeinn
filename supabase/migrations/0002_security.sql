@@ -155,6 +155,31 @@ create policy "likes_delete_requester_or_owner" on public.listing_likes
     )
   );
 
+-- The liker's identity and the moment of interest are immutable; an approval
+-- may only flip status/approvedAt. A trigger, not a column grant, for the same
+-- reason as messages: the client merges a full row, so Postgres would evaluate
+-- the UPDATE privilege before it ever matched a row.
+create or replace function public.freeze_like_request()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new."listingId" <> old."listingId"
+     or new."requesterUid" <> old."requesterUid"
+     or new."requesterName" <> old."requesterName"
+     or new."likedAt" <> old."likedAt" then
+    raise exception 'Like identity is immutable'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists listing_likes_freeze_identity on public.listing_likes;
+create trigger listing_likes_freeze_identity
+  before update on public.listing_likes
+  for each row execute function public.freeze_like_request();
+
 -- ---------------------------------------------------------------------------
 -- Matches: participants only, created by the listing owner from a real like.
 -- ---------------------------------------------------------------------------
@@ -322,12 +347,9 @@ grant select, insert, update, delete on public.listing_likes to authenticated;
 grant select, insert, update, delete on public.matches       to authenticated;
 grant select, insert, update, delete on public.messages      to authenticated;
 
--- Column-level grants replace Firestore's affectedKeys() rule for likes: an
--- owner may only write the approval fields of a request.
-revoke update on public.listing_likes from authenticated;
-grant update ("status", "approvedAt") on public.listing_likes to authenticated;
-
--- Messages keep a full UPDATE grant because the client merges a whole row on
--- send; freeze_message_identity() above is what makes content immutable.
+-- UPDATE is granted table-wide here because the client writes rows through a
+-- merge (UPDATE, then INSERT when absent). Immutability is enforced by the
+-- freeze triggers above, which is the direct equivalent of Firestore's
+-- affectedKeys().hasOnly([...]) checks.
 
 commit;
