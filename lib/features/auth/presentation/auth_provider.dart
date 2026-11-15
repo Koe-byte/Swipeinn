@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/auth_repository.dart';
@@ -18,34 +18,42 @@ final authStateProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   return AuthNotifier(ref.watch(authRepositoryProvider));
 });
 
-/// Maps Firebase Auth failures to copy a person can act on.
+/// Maps Supabase Auth failures to copy a person can act on.
 String authErrorMessage(Object? error) {
-  if (error is FirebaseAuthException) {
+  // Must be tested before AuthException: it is a subclass, and a dropped
+  // connection is the one failure people can actually do something about.
+  if (error is AuthRetryableFetchException) {
+    return 'Network error. Check your connection and try again.';
+  }
+  if (error is AuthException) {
     switch (error.code) {
-      case 'email-already-in-use':
+      case 'user_already_exists':
+      case 'email_exists':
         return 'That email is already registered. Sign in instead.';
-      case 'invalid-email':
+      case 'email_address_invalid':
+      case 'validation_failed':
         return 'Enter a valid email address.';
-      case 'weak-password':
+      case 'weak_password':
         return 'Use at least 6 characters for your password.';
-      case 'wrong-password':
-      case 'invalid-credential':
-      case 'user-not-found':
+      case 'invalid_credentials':
         return 'Incorrect email or password.';
-      case 'too-many-requests':
+      case 'email_not_confirmed':
+        return 'Confirm your email address before signing in.';
+      case 'over_email_send_rate_limit':
+      case 'over_request_rate_limit':
         return 'Too many attempts. Wait a minute and try again.';
-      case 'network-request-failed':
-        return 'Network error. Check your connection and try again.';
-      case 'operation-not-allowed':
-        return 'Email sign-in is disabled for this project. Enable Email/Password under Authentication > Sign-in method.';
-      case 'unauthorized-domain':
-        return 'This domain is not authorized. Add it under Authentication > Settings > Authorized domains.';
-      case 'user-disabled':
-        return 'This account has been disabled.';
-      case 'requires-recent-login':
-        return 'Sign in again before making this change.';
+      case 'email_provider_disabled':
+      case 'signup_disabled':
+        return 'Email sign-in is disabled for this project. Enable the Email provider under Authentication > Providers.';
+      case 'same_password':
+        return 'Pick a password you have not used before.';
+      case 'session_not_found':
+      case 'refresh_token_not_found':
+        return 'Your session expired. Sign in again.';
       default:
-        return error.message ?? 'Authentication failed (${error.code}).';
+        final message = error.message.trim();
+        if (message.isNotEmpty) return message;
+        return 'Authentication failed (${error.code ?? 'unknown'}).';
     }
   }
   if (error is StateError) return error.message;
@@ -61,7 +69,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   int _identityEpoch = 0;
 
   AuthNotifier(this._repo) : super(const AuthState()) {
-    // A restored Firebase session is available synchronously; applying it now
+    // A restored Supabase session is available synchronously; applying it now
     // avoids a splash flash on cold start. A null result still waits for the
     // stream so a slow restore never shows the signed-out screen by mistake.
     final restored = _repo.currentIdentity;
@@ -234,8 +242,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  /// Called when the person returns from their inbox. Firebase caches the
-  /// user record, so a reload is required to see the updated flag.
+  /// Called when the person returns from their inbox. Supabase caches the
+  /// user record, so a refresh is required to see the updated flag.
   Future<void> refreshVerification() async {
     state = state.copyWith(isSubmitting: true, clearError: true);
     try {
@@ -318,7 +326,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   /// Renames the account. The UI updates immediately, then rolls back if the
-  /// write fails so the profile never shows a name Firebase did not accept.
+  /// write fails so the profile never shows a name the backend did not accept.
   Future<bool> updateDisplayName(String displayName) async {
     final current = state.user;
     final name = displayName.trim();

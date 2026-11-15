@@ -2,10 +2,10 @@ import 'user_model.dart';
 
 /// Where the person is in the sign-in funnel.
 enum AuthStatus {
-  /// Reading the persisted Firebase session on cold start.
+  /// Reading the persisted Supabase session on cold start.
   restoring,
 
-  /// No Firebase session.
+  /// No Supabase session.
   signedOut,
 
   /// Signed in, but the email address has not been confirmed yet.
@@ -21,8 +21,8 @@ enum AuthStatus {
   failure,
 }
 
-/// The slice of Firebase Auth identity the app needs. Kept separate from
-/// [UserModel] because it exists even before the Firestore profile does.
+/// The slice of Supabase Auth identity the app needs. Kept separate from
+/// [UserModel] because it exists even before the profile row does.
 class AuthIdentity {
   final String uid;
   final String email;

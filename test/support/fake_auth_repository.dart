@@ -4,7 +4,8 @@ import 'package:swipeinn/features/auth/data/auth_repository.dart';
 import 'package:swipeinn/features/auth/domain/auth_state.dart';
 import 'package:swipeinn/features/auth/domain/user_model.dart';
 
-/// In-memory stand-in for Firebase. Keeps the suite offline and deterministic.
+/// In-memory stand-in for Supabase Auth. Keeps the suite offline and
+/// deterministic.
 class FakeAuthRepository implements AuthRepository {
   FakeAuthRepository({AuthIdentity? initialIdentity, UserModel? initialProfile})
       : _current = initialIdentity,

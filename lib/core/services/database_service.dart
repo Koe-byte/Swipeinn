@@ -1,18 +1,126 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'local_cache_store.dart';
+
+/// Where one app-level "collection" actually lives now.
+///
+/// The vocabulary came from Firestore. Each collection maps to a Postgres table
+/// plus the columns that identify a row, so [DatabaseService] can stay a generic
+/// gateway: callers still pass a collection name, a document id and a map.
+class _TableSpec {
+  const _TableSpec(this.table, this.primaryKey);
+
+  final String table;
+  final List<String> primaryKey;
+}
+
+/// Firestore subcollections became flat tables with a foreign key. This is the
+/// only place the old path shape is translated.
+class _SubcollectionSpec {
+  const _SubcollectionSpec({
+    required this.table,
+    required this.parentColumn,
+    required this.primaryKey,
+  });
+
+  final String table;
+
+  /// Column holding the parent document id, e.g. `matchId`.
+  final String parentColumn;
+
+  final List<String> primaryKey;
+}
+
+enum _WriteKind { set, delete, subdocument }
+
+/// A cloud write that failed and is waiting to be replayed.
+///
+/// Firestore's SDK queued offline writes itself. PostgREST does not, so without
+/// this the comment on [DatabaseService.setDocument] about retrying would be a
+/// lie and an offline edit would vanish on the next launch.
+class _PendingWrite {
+  const _PendingWrite({
+    required this.kind,
+    required this.collection,
+    required this.docId,
+    this.data = const {},
+    this.merge = true,
+    this.parentId,
+    this.subcollection,
+  });
+
+  final _WriteKind kind;
+  final String collection;
+  final String docId;
+  final Map<String, dynamic> data;
+  final bool merge;
+  final String? parentId;
+  final String? subcollection;
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind.index,
+        'collection': collection,
+        'docId': docId,
+        'data': data,
+        'merge': merge,
+        'parentId': parentId,
+        'subcollection': subcollection,
+      };
+
+  factory _PendingWrite.fromJson(Map<String, dynamic> json) {
+    final kindIndex = (json['kind'] as num?)?.toInt() ?? 0;
+    final rawData = json['data'];
+    return _PendingWrite(
+      kind: _WriteKind.values[
+          kindIndex >= 0 && kindIndex < _WriteKind.values.length
+              ? kindIndex
+              : 0],
+      collection: json['collection'] as String? ?? '',
+      docId: json['docId'] as String? ?? '',
+      data: rawData is Map
+          ? Map<String, dynamic>.from(rawData)
+          : const <String, dynamic>{},
+      merge: json['merge'] as bool? ?? true,
+      parentId: json['parentId'] as String?,
+      subcollection: json['subcollection'] as String?,
+    );
+  }
+}
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._internal();
 
   DatabaseService._internal();
 
-  // In-memory persistent fallback store matching Firestore document structure:
+  static const Map<String, _TableSpec> _tables = {
+    'users': _TableSpec('users', ['uid']),
+    'listings': _TableSpec('listings', ['id']),
+    'listing_likes': _TableSpec('listing_likes', ['listingId', 'requesterUid']),
+    'matches': _TableSpec('matches', ['id']),
+    'messages': _TableSpec('messages', ['id']),
+  };
+
+  static const Map<String, _SubcollectionSpec> _subcollections = {
+    'listings/likes': _SubcollectionSpec(
+      table: 'listing_likes',
+      parentColumn: 'listingId',
+      primaryKey: ['listingId', 'requesterUid'],
+    ),
+    'matches/messages': _SubcollectionSpec(
+      table: 'messages',
+      parentColumn: 'matchId',
+      primaryKey: ['id'],
+    ),
+  };
+
+  static const Duration _writeTimeout = Duration(seconds: 6);
+  static const Duration _readTimeout = Duration(seconds: 6);
+
+  // In-memory persistent fallback store matching the old document structure:
   // collectionPath -> docId -> data map
   final Map<String, Map<String, Map<String, dynamic>>> _localCollections = {
     'users': {},
@@ -30,17 +138,23 @@ class DatabaseService {
   final Map<String, StreamController<List<Map<String, dynamic>>>>
       _colControllers = {};
 
+  final List<_PendingWrite> _pendingWrites = [];
+
   // Collections mirrored to disk so profiles and onboarding state survive
-  // logouts, browser reloads and Firestore permission-denied responses.
+  // logouts, browser reloads and rejected writes.
   static const Set<String> _persistedCollections = {
     'users',
     'settings',
     'matches',
     'listings',
   };
-  static const String _cacheKeyPrefix = 'database_cache_v2_';
+  // v4 is the Supabase generation. The prefix bump is deliberate: a v3 cache
+  // holds Firestore-era rows keyed by Firebase uids, and restoring those would
+  // show stale listings from a backend that no longer exists.
+  static const String _cacheKeyPrefix = 'database_cache_v4_';
   static const String _subcollectionCacheKey =
-      'database_cache_v2_subcollections';
+      'database_cache_v4_subcollections';
+  static const String _pendingWritesKey = 'database_cache_v4_pending_writes';
 
   final LocalCacheStore _cacheStore = createLocalCacheStore();
   Future<void>? _cacheHydration;
@@ -91,6 +205,19 @@ class DatabaseService {
           });
         }
       }
+
+      final rawPending = await _cacheStore.read(_pendingWritesKey);
+      if (rawPending != null && rawPending.isNotEmpty) {
+        final decoded = jsonDecode(rawPending);
+        if (decoded is List) {
+          for (final entry in decoded) {
+            if (entry is Map) {
+              _pendingWrites
+                  .add(_PendingWrite.fromJson(Map<String, dynamic>.from(entry)));
+            }
+          }
+        }
+      }
     } catch (e) {
       debugPrint('[DatabaseService] Local cache hydration skipped: $e');
     }
@@ -132,13 +259,25 @@ class DatabaseService {
     }
   }
 
+  Future<void> _persistPendingWrites() async {
+    if (_persistenceDisabledForTesting) return;
+    try {
+      await _ensureLocalCacheLoaded().timeout(const Duration(seconds: 3));
+      final snapshot = _pendingWrites.map((write) => write.toJson()).toList();
+      await _cacheStore
+          .write(_pendingWritesKey, jsonEncode(snapshot))
+          .timeout(const Duration(seconds: 3));
+    } catch (e) {
+      debugPrint('[DatabaseService] Pending write cache skipped: $e');
+    }
+  }
+
   // Normalises values (DateTime, enums, nested maps) into JSON-safe primitives.
   static dynamic _jsonSafe(dynamic value) {
     if (value == null || value is num || value is bool || value is String) {
       return value;
     }
     if (value is DateTime) return value.millisecondsSinceEpoch;
-    if (value is Timestamp) return value.millisecondsSinceEpoch;
     if (value is Enum) return value.name;
     if (value is Map) {
       return value.map((k, v) => MapEntry(k.toString(), _jsonSafe(v)));
@@ -148,7 +287,7 @@ class DatabaseService {
   }
 
   /// Prefers the locally cached document when it is newer than the cloud copy.
-  /// This prevents a stale Firestore profile from resetting onboarding state.
+  /// This prevents a stale profile from resetting onboarding state.
   static Map<String, dynamic> _preferNewest(
     Map<String, dynamic> cloud,
     Map<String, dynamic>? local,
@@ -167,6 +306,7 @@ class DatabaseService {
   void resetForTesting() {
     _localCollections.updateAll((_, __) => {});
     _localSubcollections.clear();
+    _pendingWrites.clear();
     // Keep tests isolated from previously hydrated data without touching the
     // real persistent store, and skip plugin-backed writes that would leave
     // pending timers in widget tests.
@@ -174,35 +314,209 @@ class DatabaseService {
     _cacheHydration = null;
   }
 
-  bool get isFirebaseAvailable {
+  /// True when a live Supabase client exists and [Supabase.initialize] has run.
+  bool get isSupabaseAvailable => _client != null;
+
+  SupabaseClient? get _client {
     try {
-      if (Firebase.apps.isEmpty) return false;
-      final app = Firebase.app();
-      final key = app.options.apiKey;
-      final project = app.options.projectId;
-      // If placeholder or demo options, safely use local resilient database engine
-      if (key.contains('Placeholder') ||
-          key.isEmpty ||
-          project.contains('placeholder') ||
-          project == 'rently-app-mvp') {
-        return false;
-      }
-      return true;
+      return Supabase.instance.client;
     } catch (_) {
-      return false;
+      // Initialization failed or has not happened yet (widget tests).
+      return null;
     }
   }
 
-  FirebaseFirestore? get firestore {
-    if (isFirebaseAvailable) {
-      try {
-        return FirebaseFirestore.instance;
-      } catch (e) {
-        debugPrint('[DatabaseService] Firestore access error: $e');
-        return null;
+  // ---------------------------------------------------------------------------
+  // Cloud write plumbing
+  // ---------------------------------------------------------------------------
+
+  static Map<String, Object> _documentFilter(
+      _TableSpec spec, String docId) {
+    if (spec.primaryKey.length != 1) {
+      throw StateError(
+          'Collection ${spec.table} needs a composite key and has no root rows.');
+    }
+    return {spec.primaryKey.first: docId};
+  }
+
+  static Map<String, Object> _subdocumentFilter(
+    _SubcollectionSpec spec,
+    String parentId,
+    String docId,
+  ) {
+    final filter = <String, Object>{spec.parentColumn: parentId};
+    if (spec.primaryKey.length == 1) {
+      filter[spec.primaryKey.first] = docId;
+    } else {
+      final idColumn = spec.primaryKey.firstWhere(
+        (column) => column != spec.parentColumn,
+        orElse: () => spec.primaryKey.last,
+      );
+      filter[idColumn] = docId;
+    }
+    return filter;
+  }
+
+  static String _subdocumentId(
+    _SubcollectionSpec spec,
+    Map<String, dynamic> row,
+  ) {
+    if (spec.primaryKey.length == 1) {
+      return row[spec.primaryKey.first]?.toString() ?? '';
+    }
+    final idColumn = spec.primaryKey.firstWhere(
+      (column) => column != spec.parentColumn,
+      orElse: () => spec.primaryKey.last,
+    );
+    return row[idColumn]?.toString() ?? '';
+  }
+
+  static String _documentId(_TableSpec spec, Map<String, dynamic> row) {
+    return row[spec.primaryKey.first]?.toString() ?? '';
+  }
+
+  /// PostgREST's upsert cannot express "merge": a partial row would violate the
+  /// NOT NULL columns. So a merge is an UPDATE, falling back to an INSERT only
+  /// when the row genuinely does not exist yet.
+  ///
+  /// Key columns are stripped from the UPDATE body. Postgres checks column
+  /// privileges before it compares values, so repeating `"listingId" = ...` in
+  /// the SET clause would fail even though the value is unchanged — and the
+  /// likes/messages tables deliberately grant UPDATE on only a few columns.
+  static Future<void> _writeRow(
+    SupabaseClient client,
+    String table,
+    List<String> primaryKey,
+    Map<String, Object> filter,
+    Map<String, dynamic> row, {
+    required bool merge,
+  }) async {
+    if (!merge) {
+      await client
+          .from(table)
+          .upsert({...filter, ...row}).timeout(_writeTimeout);
+      return;
+    }
+
+    final columns = primaryKey.join(',');
+    final patch = <String, dynamic>{};
+    row.forEach((column, value) {
+      final unchangedKey =
+          filter.containsKey(column) && filter[column] == value;
+      if (!unchangedKey) patch[column] = value;
+    });
+
+    if (patch.isNotEmpty) {
+      final updated = await client
+          .from(table)
+          .update(patch)
+          .match(filter)
+          .select(columns)
+          .timeout(_writeTimeout);
+      if (updated.isNotEmpty) return;
+    } else {
+      // Nothing to change: report success if the row is already there.
+      final existing = await client
+          .from(table)
+          .select(columns)
+          .match(filter)
+          .limit(1)
+          .timeout(_writeTimeout);
+      if (existing.isNotEmpty) return;
+    }
+
+    try {
+      await client
+          .from(table)
+          .insert({...filter, ...row}).timeout(_writeTimeout);
+    } on PostgrestException catch (error) {
+      // Lost a race: another writer inserted between the update and the
+      // insert. Retry the merge once rather than surfacing a false failure.
+      if (error.code != '23505') rethrow;
+      if (patch.isEmpty) return;
+      final retried = await client
+          .from(table)
+          .update(patch)
+          .match(filter)
+          .select(columns)
+          .timeout(_writeTimeout);
+      if (retried.isEmpty) {
+        throw StateError('Write to $table was rejected.');
       }
     }
-    return null;
+  }
+
+  static Future<void> _executePending(
+    SupabaseClient client,
+    _PendingWrite write,
+  ) async {
+    if (write.kind == _WriteKind.subdocument) {
+      final spec = _subcollections['${write.collection}/${write.subcollection}'];
+      if (spec == null) return;
+      final parentId = write.parentId;
+      if (parentId == null) return;
+      final filter = _subdocumentFilter(spec, parentId, write.docId);
+      await _writeRow(
+        client,
+        spec.table,
+        spec.primaryKey,
+        filter,
+        {...write.data, ...filter},
+        merge: true,
+      );
+      return;
+    }
+
+    final spec = _tables[write.collection];
+    if (spec == null) return;
+    final filter = _documentFilter(spec, write.docId);
+
+    if (write.kind == _WriteKind.delete) {
+      await client.from(spec.table).delete().match(filter).timeout(_writeTimeout);
+      return;
+    }
+
+    final row = <String, dynamic>{...write.data};
+    for (final column in spec.primaryKey) {
+      row.putIfAbsent(column, () => filter[column]);
+    }
+    await _writeRow(
+      client,
+      spec.table,
+      spec.primaryKey,
+      filter,
+      row,
+      merge: write.merge,
+    );
+  }
+
+  Future<void> _queueWrite(_PendingWrite write) async {
+    _pendingWrites.add(write);
+    await _persistPendingWrites();
+  }
+
+  /// Replays writes that failed while offline. Safe to call more than once.
+  Future<void> flushPendingWrites() async {
+    final client = _client;
+    if (client == null || _pendingWrites.isEmpty) return;
+
+    final queued = List<_PendingWrite>.from(_pendingWrites);
+    _pendingWrites.clear();
+    var failed = 0;
+    for (final write in queued) {
+      try {
+        await _executePending(client, write);
+      } catch (error) {
+        failed++;
+        _pendingWrites.add(write);
+        debugPrint('[DatabaseService] Pending write still failing: $error');
+      }
+    }
+    await _persistPendingWrites();
+    if (queued.length > failed) {
+      debugPrint('[DatabaseService] Replayed ${queued.length - failed} '
+          'pending write(s); $failed still queued.');
+    }
   }
 
   // --- Document Operations ---
@@ -226,30 +540,47 @@ class DatabaseService {
 
     // 2. Mirror to the durable local cache so profiles (including
     //    hasCompletedOnboarding) survive logouts and browser reloads even if
-    //    Cloud Firestore later rejects the write with permission-denied.
+    //    the cloud write is rejected.
     unawaited(_persistCollection(collection));
 
-    // 3. Cloud Firestore sync with non-blocking timeout if configured
-    final fs = firestore;
-    if (fs == null) return true;
+    // 3. Supabase sync with non-blocking timeout if configured
+    final spec = _tables[collection];
+    final client = _client;
+    if (spec == null || client == null) return true;
+
     try {
-      await fs
-          .collection(collection)
-          .doc(docId)
-          .set(data, SetOptions(merge: merge))
-          .timeout(const Duration(seconds: 3));
+      final filter = _documentFilter(spec, docId);
+      final row = <String, dynamic>{...data};
+      for (final column in spec.primaryKey) {
+        row.putIfAbsent(column, () => filter[column]);
+      }
+      await _writeRow(
+        client,
+        spec.table,
+        spec.primaryKey,
+        filter,
+        row,
+        merge: merge,
+      );
+      unawaited(flushPendingWrites());
       return true;
     } catch (e) {
       debugPrint(
-        '[DatabaseService] Cloud Firestore write failed for '
-        '$collection/$docId; kept in the local cache and will retry on the '
-        'next sync: $e',
+        '[DatabaseService] Supabase write failed for '
+        '$collection/$docId; queued for the next sync: $e',
       );
+      await _queueWrite(_PendingWrite(
+        kind: _WriteKind.set,
+        collection: collection,
+        docId: docId,
+        data: data,
+        merge: merge,
+      ));
       return false;
     }
   }
 
-  /// Removes a document locally and in Firestore. Returns `false` when the
+  /// Removes a document locally and in the cloud. Returns `false` when the
   /// cloud delete could not be confirmed, so callers can tell the person the
   /// change may not have reached other devices.
   Future<bool> deleteDocument({
@@ -261,20 +592,27 @@ class DatabaseService {
     _notifyCollection(collection);
     unawaited(_persistCollection(collection));
 
-    final fs = firestore;
-    if (fs == null) return true;
+    final spec = _tables[collection];
+    final client = _client;
+    if (spec == null || client == null) return true;
+
     try {
-      await fs
-          .collection(collection)
-          .doc(docId)
+      await client
+          .from(spec.table)
           .delete()
-          .timeout(const Duration(seconds: 3));
+          .match(_documentFilter(spec, docId)).timeout(_writeTimeout);
+      unawaited(flushPendingWrites());
       return true;
     } catch (e) {
       debugPrint(
-        '[DatabaseService] Cloud Firestore delete failed for '
-        '$collection/$docId; removed from the local cache only: $e',
+        '[DatabaseService] Supabase delete failed for '
+        '$collection/$docId; queued for the next sync: $e',
       );
+      await _queueWrite(_PendingWrite(
+        kind: _WriteKind.delete,
+        collection: collection,
+        docId: docId,
+      ));
       return false;
     }
   }
@@ -284,26 +622,32 @@ class DatabaseService {
     required String docId,
   }) async {
     final local = _localCollections[collection]?[docId];
-    final fs = firestore;
-    if (fs != null) {
+    final spec = _tables[collection];
+    final client = _client;
+    if (spec != null && client != null) {
       try {
-        final snap = await fs.collection(collection).doc(docId).get();
-        if (snap.exists && snap.data() != null) {
-          final resolved = _preferNewest(snap.data()!, local);
+        final data = await client
+            .from(spec.table)
+            .select()
+            .match(_documentFilter(spec, docId))
+            .maybeSingle()
+            .timeout(_readTimeout);
+        if (data != null) {
+          final resolved = _preferNewest(Map<String, dynamic>.from(data), local);
           _localCollections.putIfAbsent(collection, () => {})[docId] = resolved;
           unawaited(_persistCollection(collection));
           return resolved;
         }
       } catch (e) {
         debugPrint(
-            '[DatabaseService] Cloud Firestore read failed, checking local store: $e');
+            '[DatabaseService] Supabase read failed, checking local store: $e');
       }
     }
 
     return local;
   }
 
-  /// Reads only the durable local mirror, without touching Cloud Firestore.
+  /// Reads only the durable local mirror, without touching the cloud.
   /// Used by mock/demo identities that must never perform cloud operations.
   Future<Map<String, dynamic>?> getLocalDocument({
     required String collection,
@@ -325,8 +669,8 @@ class DatabaseService {
   }
 
   /// Immediately mirrors a document into the durable local cache without
-  /// waiting on Cloud Firestore. Used for mock/sample profiles so onboarding
-  /// state is durable even when the cloud write is rejected.
+  /// waiting on the cloud. Used for sample profiles so onboarding state is
+  /// durable even when the cloud write is rejected.
   Future<void> cacheDocumentLocally({
     required String collection,
     required String docId,
@@ -349,16 +693,21 @@ class DatabaseService {
     required String collection,
     required String docId,
   }) {
-    final fs = firestore;
-    if (fs == null) {
+    final spec = _tables[collection];
+    final client = _client;
+    if (spec == null || client == null) {
       return _localDocumentStream(collection, docId);
     }
-    return _firestoreDocumentStream(fs, collection, docId);
+    return _supabaseDocumentStream(client, collection, spec, docId);
   }
 
-  /// Streams a whole collection, optionally narrowed by one equality filter and
-  /// one array-contains filter. Results are unordered; repositories sort them so
-  /// the app does not need composite Firestore indexes.
+  /// Streams a whole table, optionally narrowed by one equality filter and one
+  /// array-contains filter. Results are unordered; repositories sort them so the
+  /// app does not need composite indexes.
+  ///
+  /// Row Level Security already scopes what the signed-in account may see, so
+  /// filtering happens client-side and one subscription serves every screen
+  /// that watches the same collection.
   Stream<List<Map<String, dynamic>>> streamCollection({
     required String collection,
     String? whereField,
@@ -367,8 +716,9 @@ class DatabaseService {
     Object? arrayContainsValue,
     int? limit,
   }) {
-    final fs = firestore;
-    if (fs == null) {
+    final spec = _tables[collection];
+    final client = _client;
+    if (spec == null || client == null) {
       return _localCollectionStream(
         collection,
         whereField: whereField,
@@ -377,9 +727,10 @@ class DatabaseService {
         arrayContainsValue: arrayContainsValue,
       );
     }
-    return _firestoreCollectionStream(
-      fs,
+    return _supabaseCollectionStream(
+      client,
       collection,
+      spec,
       whereField: whereField,
       isEqualTo: isEqualTo,
       arrayContainsField: arrayContainsField,
@@ -388,28 +739,38 @@ class DatabaseService {
     );
   }
 
-  Stream<Map<String, dynamic>?> _firestoreDocumentStream(
-    FirebaseFirestore fs,
+  Stream<Map<String, dynamic>?> _supabaseDocumentStream(
+    SupabaseClient client,
     String collection,
+    _TableSpec spec,
     String docId,
   ) async* {
+    if (spec.primaryKey.length != 1) {
+      yield* _localDocumentStream(collection, docId);
+      return;
+    }
     try {
-      await for (final snap
-          in fs.collection(collection).doc(docId).snapshots()) {
-        final data = snap.data();
-        if (data != null) {
+      final rows = client
+          .from(spec.table)
+          .stream(primaryKey: spec.primaryKey)
+          .eq(spec.primaryKey.first, docId);
+      await for (final batch in rows) {
+        final row = batch.isEmpty
+            ? null
+            : Map<String, dynamic>.from(batch.first);
+        if (row != null) {
           final resolved =
-              _preferNewest(data, _localCollections[collection]?[docId]);
+              _preferNewest(row, _localCollections[collection]?[docId]);
           _localCollections.putIfAbsent(collection, () => {})[docId] = resolved;
           unawaited(_persistCollection(collection));
           yield resolved;
         } else {
-          yield _localCollections[collection]?[docId];
+          yield null;
         }
       }
     } catch (e) {
       debugPrint(
-          '[DatabaseService] Firestore document stream failed, using local store: $e');
+          '[DatabaseService] Supabase document stream failed, using local store: $e');
       yield* _localDocumentStream(collection, docId);
     }
   }
@@ -428,9 +789,10 @@ class DatabaseService {
     return _docControllers[key]!.stream;
   }
 
-  Stream<List<Map<String, dynamic>>> _firestoreCollectionStream(
-    FirebaseFirestore fs,
-    String collection, {
+  Stream<List<Map<String, dynamic>>> _supabaseCollectionStream(
+    SupabaseClient client,
+    String collection,
+    _TableSpec spec, {
     String? whereField,
     Object? isEqualTo,
     String? arrayContainsField,
@@ -438,31 +800,34 @@ class DatabaseService {
     int? limit,
   }) async* {
     try {
-      Query<Map<String, dynamic>> query = fs.collection(collection);
-      if (whereField != null && isEqualTo != null) {
-        query = query.where(whereField, isEqualTo: isEqualTo);
-      }
-      if (arrayContainsField != null && arrayContainsValue != null) {
-        query = query.where(
-          arrayContainsField,
-          arrayContains: arrayContainsValue,
-        );
-      }
-      if (limit != null) query = query.limit(limit);
-
-      await for (final snap in query.snapshots()) {
+      await for (final rows
+          in client.from(spec.table).stream(primaryKey: spec.primaryKey)) {
         final docs =
-            snap.docs.map((doc) => {...doc.data(), 'id': doc.id}).toList();
-        _localCollections.putIfAbsent(collection, () => {});
-        for (final doc in snap.docs) {
-          _localCollections[collection]![doc.id] = doc.data();
+            rows.map((row) => Map<String, dynamic>.from(row)).toList();
+        final store = _localCollections.putIfAbsent(collection, () => {});
+        for (final doc in docs) {
+          final id = _documentId(spec, doc);
+          if (id.isNotEmpty) store[id] = doc;
         }
         unawaited(_persistCollection(collection));
-        yield docs;
+
+        var filtered = docs
+            .where((doc) => _passesFilters(
+                  doc,
+                  whereField: whereField,
+                  isEqualTo: isEqualTo,
+                  arrayContainsField: arrayContainsField,
+                  arrayContainsValue: arrayContainsValue,
+                ))
+            .toList();
+        if (limit != null && filtered.length > limit) {
+          filtered = filtered.sublist(0, limit);
+        }
+        yield filtered;
       }
     } catch (e) {
       debugPrint(
-        '[DatabaseService] Firestore collection stream failed for '
+        '[DatabaseService] Supabase collection stream failed for '
         '$collection, using local store: $e',
       );
       yield* _localCollectionStream(
@@ -475,6 +840,27 @@ class DatabaseService {
     }
   }
 
+  static bool _passesFilters(
+    Map<String, dynamic> data, {
+    String? whereField,
+    Object? isEqualTo,
+    String? arrayContainsField,
+    Object? arrayContainsValue,
+  }) {
+    if (whereField != null &&
+        isEqualTo != null &&
+        data[whereField] != isEqualTo) {
+      return false;
+    }
+    if (arrayContainsField != null && arrayContainsValue != null) {
+      final values = data[arrayContainsField];
+      if (values is! Iterable || !values.contains(arrayContainsValue)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   List<Map<String, dynamic>> _localCollectionSnapshot(
     String collection, {
     String? whereField,
@@ -484,20 +870,13 @@ class DatabaseService {
   }) {
     final docs = _localCollections[collection] ?? const {};
     return docs.values
-        .where((data) {
-          if (whereField != null &&
-              isEqualTo != null &&
-              data[whereField] != isEqualTo) {
-            return false;
-          }
-          if (arrayContainsField != null && arrayContainsValue != null) {
-            final values = data[arrayContainsField];
-            if (values is! Iterable || !values.contains(arrayContainsValue)) {
-              return false;
-            }
-          }
-          return true;
-        })
+        .where((data) => _passesFilters(
+              data,
+              whereField: whereField,
+              isEqualTo: isEqualTo,
+              arrayContainsField: arrayContainsField,
+              arrayContainsValue: arrayContainsValue,
+            ))
         .map((data) => Map<String, dynamic>.from(data))
         .toList();
   }
@@ -549,21 +928,33 @@ class DatabaseService {
     _notifyCollection(path);
     unawaited(_persistSubcollections());
 
-    // 2. Cloud Firestore sync with timeout if active
-    final fs = firestore;
-    if (fs != null) {
-      try {
-        await fs
-            .collection(parentCollection)
-            .doc(parentId)
-            .collection(subcollection)
-            .doc(docId)
-            .set(data, SetOptions(merge: true))
-            .timeout(const Duration(seconds: 3));
-      } catch (e) {
-        debugPrint(
-            '[DatabaseService] Firestore subdocument write skipped/fallback: $e');
-      }
+    // 2. Supabase sync with timeout if active
+    final spec = _subcollections['$parentCollection/$subcollection'];
+    final client = _client;
+    if (spec == null || client == null) return;
+
+    try {
+      final filter = _subdocumentFilter(spec, parentId, docId);
+      await _writeRow(
+        client,
+        spec.table,
+        spec.primaryKey,
+        filter,
+        {...data, ...filter},
+        merge: true,
+      );
+      unawaited(flushPendingWrites());
+    } catch (e) {
+      debugPrint(
+          '[DatabaseService] Supabase subdocument write failed; queued: $e');
+      await _queueWrite(_PendingWrite(
+        kind: _WriteKind.subdocument,
+        collection: parentCollection,
+        docId: docId,
+        data: data,
+        parentId: parentId,
+        subcollection: subcollection,
+      ));
     }
   }
 
@@ -576,23 +967,24 @@ class DatabaseService {
     required String docId,
   }) async {
     final path = '$parentCollection/$parentId/$subcollection';
-    final fs = firestore;
-    if (fs != null) {
+    final spec = _subcollections['$parentCollection/$subcollection'];
+    final client = _client;
+    if (spec != null && client != null) {
       try {
-        final snap = await fs
-            .collection(parentCollection)
-            .doc(parentId)
-            .collection(subcollection)
-            .doc(docId)
-            .get();
-        if (snap.exists && snap.data() != null) {
+        final data = await client
+            .from(spec.table)
+            .select()
+            .match(_subdocumentFilter(spec, parentId, docId))
+            .maybeSingle()
+            .timeout(_readTimeout);
+        if (data != null) {
           _localSubcollections.putIfAbsent(path, () => {})[docId] =
-              Map<String, dynamic>.from(snap.data()!);
+              Map<String, dynamic>.from(data);
           unawaited(_persistSubcollections());
-          return Map<String, dynamic>.from(snap.data()!);
+          return Map<String, dynamic>.from(data);
         }
       } catch (e) {
-        debugPrint('[DatabaseService] Firestore subdocument read failed: $e');
+        debugPrint('[DatabaseService] Supabase subdocument read failed: $e');
       }
     }
     final local = _localSubcollections[path]?[docId];
@@ -605,23 +997,26 @@ class DatabaseService {
     required String subcollection,
   }) async {
     final path = '$parentCollection/$parentId/$subcollection';
-    final fs = firestore;
-    if (fs != null) {
+    final spec = _subcollections['$parentCollection/$subcollection'];
+    final client = _client;
+    if (spec != null && client != null) {
       try {
-        final snap = await fs
-            .collection(parentCollection)
-            .doc(parentId)
-            .collection(subcollection)
-            .get();
-        if (snap.docs.isNotEmpty) {
+        final rows = await client
+            .from(spec.table)
+            .select()
+            .eq(spec.parentColumn, parentId)
+            .timeout(_readTimeout);
+        if (rows.isNotEmpty) {
           _localSubcollections[path] = {
-            for (final doc in snap.docs) doc.id: doc.data(),
+            for (final row in rows)
+              _subdocumentId(spec, Map<String, dynamic>.from(row)):
+                  Map<String, dynamic>.from(row),
           };
           unawaited(_persistSubcollections());
-          return snap.docs.map((d) => d.data()).toList();
+          return rows.map((row) => Map<String, dynamic>.from(row)).toList();
         }
       } catch (e) {
-        debugPrint('[DatabaseService] Firestore subcollection read failed: $e');
+        debugPrint('[DatabaseService] Supabase subcollection read failed: $e');
       }
     }
 
@@ -633,42 +1028,45 @@ class DatabaseService {
     required String parentId,
     required String subcollection,
   }) {
-    final fs = firestore;
-    if (fs == null) {
+    final spec = _subcollections['$parentCollection/$subcollection'];
+    final client = _client;
+    if (spec == null || client == null) {
       return _localSubcollectionStream(
           parentCollection, parentId, subcollection);
     }
-    return _firestoreSubcollectionStream(
-      fs,
+    return _supabaseSubcollectionStream(
+      client,
       parentCollection,
       parentId,
       subcollection,
+      spec,
     );
   }
 
-  Stream<List<Map<String, dynamic>>> _firestoreSubcollectionStream(
-    FirebaseFirestore fs,
+  Stream<List<Map<String, dynamic>>> _supabaseSubcollectionStream(
+    SupabaseClient client,
     String parentCollection,
     String parentId,
     String subcollection,
+    _SubcollectionSpec spec,
   ) async* {
     final path = '$parentCollection/$parentId/$subcollection';
     try {
-      await for (final snap in fs
-          .collection(parentCollection)
-          .doc(parentId)
-          .collection(subcollection)
-          .snapshots()) {
-        final docs = snap.docs.map((d) => d.data()).toList();
+      final rows = client
+          .from(spec.table)
+          .stream(primaryKey: spec.primaryKey)
+          .eq(spec.parentColumn, parentId);
+      await for (final batch in rows) {
+        final docs = batch.map((row) => Map<String, dynamic>.from(row)).toList();
         _localSubcollections[path] = {
-          for (final doc in snap.docs) doc.id: doc.data(),
+          for (final doc in docs) _subdocumentId(spec, doc): doc,
         };
         unawaited(_persistSubcollections());
         yield docs;
       }
     } catch (e) {
       debugPrint(
-          '[DatabaseService] Firestore subcollection stream failed, using local store: $e');
+          '[DatabaseService] Supabase subcollection stream failed, using local store: $e');
       yield* _localSubcollectionStream(
           parentCollection, parentId, subcollection);
     }

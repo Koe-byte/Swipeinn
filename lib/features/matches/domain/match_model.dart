@@ -29,8 +29,8 @@ class MatchModel {
   final String ownerUid;
   final String requesterUid;
 
-  /// Stored so Firestore can answer "matches for me" with one array-contains
-  /// query instead of two OR queries.
+  /// Stored so one indexed array lookup can answer "matches for me"
+  /// instead of two OR queries.
   final List<String> participantUids;
 
   final MatchStatus status;

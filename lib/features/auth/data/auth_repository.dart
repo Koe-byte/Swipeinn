@@ -1,19 +1,19 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
+import '../../../core/services/database_service.dart';
 import '../domain/auth_state.dart';
 import '../domain/user_model.dart';
 
 /// The default backend. Tests override this provider with an in-memory
-/// implementation so the suite never needs a live Firebase project.
+/// implementation so the suite never needs a live Supabase project.
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  return FirebaseAuthRepository();
+  return SupabaseAuthRepository();
 });
 
 /// Everything the app needs from the identity provider and the profile store.
 abstract class AuthRepository {
-  /// Emits on every Firebase session change, including token refreshes that
+  /// Emits on every Supabase session change, including token refreshes that
   /// flip [AuthIdentity.isEmailVerified].
   Stream<AuthIdentity?> authStateChanges();
 
@@ -43,24 +43,24 @@ abstract class AuthRepository {
 
   Future<void> saveProfile(UserModel user);
 
-  /// Renames the account in Firebase Auth and mirrors the new name onto the
-  /// profile document.
+  /// Renames the account in Supabase Auth and mirrors the new name onto the
+  /// profile row.
   Future<void> updateDisplayName(String displayName);
 }
 
-class FirebaseAuthRepository implements AuthRepository {
-  FirebaseAuth get _auth => FirebaseAuth.instance;
-  FirebaseFirestore get _db => FirebaseFirestore.instance;
+class SupabaseAuthRepository implements AuthRepository {
+  SupabaseClient get _client => Supabase.instance.client;
 
   @override
   AuthIdentity? get currentIdentity {
-    final user = _auth.currentUser;
+    final user = _client.auth.currentUser;
     return user == null ? null : _toIdentity(user);
   }
 
   @override
   Stream<AuthIdentity?> authStateChanges() {
-    return _auth.authStateChanges().map((user) {
+    return _client.auth.onAuthStateChange.map((change) {
+      final user = change.session?.user;
       return user == null ? null : _toIdentity(user);
     });
   }
@@ -71,24 +71,25 @@ class FirebaseAuthRepository implements AuthRepository {
     required String password,
     required String displayName,
   }) async {
-    final credential = await _auth.createUserWithEmailAndPassword(
+    final name =
+        displayName.trim().isEmpty ? 'Swipeinn user' : displayName.trim();
+
+    // "Confirm email" is disabled for this project, so Supabase marks the
+    // address confirmed at creation and returns a live session. The display
+    // name rides along in user metadata instead of costing a second request.
+    final response = await _client.auth.signUp(
       email: email.trim(),
       password: password,
+      data: {'display_name': name},
     );
-    final user = credential.user;
+
+    final user = response.user;
     if (user == null) {
       throw StateError('Account creation returned no user.');
     }
 
-    final name =
-        displayName.trim().isEmpty ? 'Swipeinn user' : displayName.trim();
-    await user.updateDisplayName(name);
-
-    // Verification is sent before any Firestore write so a network failure
-    // never strands an account that cannot be verified. The profile document
-    // is created by the auth gate once the address is confirmed.
-    await user.sendEmailVerification();
-
+    // The profile row is created by the auth gate once the identity reaches
+    // `ready`; writing it here would race that first read.
     return _toIdentity(user);
   }
 
@@ -97,64 +98,67 @@ class FirebaseAuthRepository implements AuthRepository {
     required String email,
     required String password,
   }) async {
-    final credential = await _auth.signInWithEmailAndPassword(
+    final response = await _client.auth.signInWithPassword(
       email: email.trim(),
       password: password,
     );
-    final user = credential.user;
+    final user = response.user;
     if (user == null) throw StateError('Sign-in returned no user.');
     return _toIdentity(user);
   }
 
   @override
-  Future<void> signOut() => _auth.signOut();
+  Future<void> signOut() => _client.auth.signOut();
 
   @override
   Future<void> sendEmailVerification() async {
-    final user = _auth.currentUser;
-    if (user == null) throw StateError('No signed-in user to verify.');
-    await user.sendEmailVerification();
+    final email = _client.auth.currentUser?.email;
+    if (email == null) throw StateError('No signed-in user to verify.');
+    await _client.auth.resend(type: OtpType.signup, email: email);
   }
 
   @override
   Future<AuthIdentity> reloadIdentity() async {
-    final user = _auth.currentUser;
-    if (user == null) throw StateError('No signed-in user to reload.');
-    await user.reload();
-    final refreshed = _auth.currentUser;
-    if (refreshed == null) throw StateError('Session ended while reloading.');
-
-    // Firestore rules read email_verified from the ID token, which can lag the
-    // user record by up to an hour. Force a refresh once the address is
-    // confirmed so the first like or listing write is not permission-denied.
-    if (refreshed.emailVerified) {
-      await refreshed.getIdToken(true);
+    if (_client.auth.currentSession == null) {
+      throw StateError('No signed-in user to reload.');
     }
 
-    return _toIdentity(refreshed);
+    // refreshSession re-reads the user record; emailConfirmedAt is what the
+    // gate watches, so a stale cached user would pin the account to the
+    // verification screen forever.
+    final response = await _client.auth.refreshSession();
+    final user = response.user ?? _client.auth.currentUser;
+    if (user == null) throw StateError('Session ended while reloading.');
+
+    return _toIdentity(user);
   }
 
   @override
   Future<void> sendPasswordReset(String email) {
-    return _auth.sendPasswordResetEmail(email: email.trim());
+    return _client.auth.resetPasswordForEmail(email.trim());
   }
 
   @override
   Future<UserModel?> fetchProfile(String uid) async {
-    final snapshot = await _db.collection('users').doc(uid).get();
-    final data = snapshot.data();
+    // Through DatabaseService rather than a raw query so a cold start without
+    // a connection can still restore the last profile from the local mirror.
+    final data = await DatabaseService.instance
+        .getDocument(collection: 'users', docId: uid);
     if (data == null) return null;
-    return UserModel.fromMap(data, uid);
+    return UserModel.fromMap(Map<String, dynamic>.from(data), uid);
   }
 
   @override
   Future<void> saveProfile(UserModel user) async {
-    final map = user.toMap();
-    map['updatedAt'] = FieldValue.serverTimestamp();
-    await _db
-        .collection('users')
-        .doc(user.uid)
-        .set(map, SetOptions(merge: true));
+    final map = Map<String, dynamic>.from(user.toMap());
+    map['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
+    // Merge, not replace: the caller may only be changing a subset of fields,
+    // and DatabaseService turns this into an UPDATE with an INSERT fallback.
+    await DatabaseService.instance.setDocument(
+      collection: 'users',
+      docId: user.uid,
+      data: map,
+    );
   }
 
   @override
@@ -163,23 +167,27 @@ class FirebaseAuthRepository implements AuthRepository {
     if (name.isEmpty) {
       throw ArgumentError.value(displayName, 'displayName', 'Cannot be empty');
     }
-    final user = _auth.currentUser;
+    final user = _client.auth.currentUser;
     if (user == null) throw StateError('No signed-in user to rename.');
 
-    await user.updateDisplayName(name);
+    await _client.auth.updateUser(
+      UserAttributes(data: {'display_name': name}),
+    );
 
-    final profile = await fetchProfile(user.uid);
+    final profile = await fetchProfile(user.id);
     if (profile != null) {
       await saveProfile(profile.copyWith(displayName: name));
     }
   }
 
   static AuthIdentity _toIdentity(User user) {
+    final metadata = user.userMetadata;
+    final displayName = metadata?['display_name'];
     return AuthIdentity(
-      uid: user.uid,
+      uid: user.id,
       email: user.email ?? '',
-      displayName: user.displayName ?? '',
-      isEmailVerified: user.emailVerified,
+      displayName: displayName is String ? displayName : '',
+      isEmailVerified: user.emailConfirmedAt != null,
     );
   }
 }

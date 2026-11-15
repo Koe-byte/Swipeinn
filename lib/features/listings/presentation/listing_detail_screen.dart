@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/navigation/route_names.dart';
+import '../../../core/services/photo_storage_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/empty_state_view.dart';
 import '../../auth/presentation/auth_provider.dart';
@@ -86,6 +89,14 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
     final deleted =
         await ref.read(listingsRepositoryProvider).deleteListing(listing.id);
     if (!mounted) return;
+
+    // Only clean up the bucket once the row is actually gone; otherwise a
+    // failed delete would leave a listing pointing at missing photos.
+    if (deleted) {
+      for (final photo in listing.photos) {
+        unawaited(PhotoStorageService.instance.deletePhotoByUrl(photo));
+      }
+    }
 
     navigator.pop();
     messenger.showSnackBar(
@@ -200,18 +211,7 @@ class _ListingBody extends StatelessWidget {
           child: ListView(
             padding: EdgeInsets.zero,
             children: [
-              SizedBox(
-                height: 220,
-                width: double.infinity,
-                child: listing.photos.isNotEmpty
-                    ? Image.network(
-                        listing.photos.first,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const _PhotoPlaceholder(),
-                      )
-                    : const _PhotoPlaceholder(),
-              ),
+              _PhotoGallery(photos: listing.photos),
               Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(
@@ -466,6 +466,114 @@ class _SectionTitle extends StatelessWidget {
         fontSize: 14,
         fontWeight: FontWeight.bold,
         color: AppTheme.navyDark,
+      ),
+    );
+  }
+}
+
+/// Swipeable photo strip at the top of the detail screen.
+///
+/// A listing with no photos keeps the old placeholder. A single photo renders
+/// as a plain cover image, so the extra affordances only appear when there is
+/// actually something to swipe to.
+class _PhotoGallery extends StatefulWidget {
+  final List<String> photos;
+
+  const _PhotoGallery({required this.photos});
+
+  @override
+  State<_PhotoGallery> createState() => _PhotoGalleryState();
+}
+
+class _PhotoGalleryState extends State<_PhotoGallery> {
+  final PageController _controller = PageController();
+  int _index = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final photos = widget.photos;
+    if (photos.isEmpty) {
+      return const SizedBox(height: 220, child: _PhotoPlaceholder());
+    }
+    if (photos.length == 1) {
+      return SizedBox(
+        height: 220,
+        width: double.infinity,
+        child: Image.network(
+          photos.first,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) =>
+              const _PhotoPlaceholder(),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 220,
+      width: double.infinity,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          PageView.builder(
+            controller: _controller,
+            itemCount: photos.length,
+            onPageChanged: (index) => setState(() => _index = index),
+            itemBuilder: (context, index) => Image.network(
+              photos[index],
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) =>
+                  const _PhotoPlaceholder(),
+            ),
+          ),
+          Positioned(
+            top: 12,
+            right: 12,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '${_index + 1}/${photos.length}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 10,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var index = 0; index < photos.length; index++)
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    width: index == _index ? 16 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: index == _index
+                          ? AppTheme.primaryAmber
+                          : Colors.white70,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

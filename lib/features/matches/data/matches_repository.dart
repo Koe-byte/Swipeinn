@@ -4,7 +4,7 @@ import '../../../core/services/database_service.dart';
 import '../domain/match_model.dart';
 
 final matchesRepositoryProvider = Provider<MatchesRepository>((ref) {
-  return FirestoreMatchesRepository();
+  return SupabaseMatchesRepository();
 });
 
 /// Bilateral conversations and their messages.
@@ -30,7 +30,7 @@ abstract class MatchesRepository {
   });
 }
 
-class FirestoreMatchesRepository implements MatchesRepository {
+class SupabaseMatchesRepository implements MatchesRepository {
   final DatabaseService _db = DatabaseService.instance;
 
   @override
@@ -114,7 +114,6 @@ class FirestoreMatchesRepository implements MatchesRepository {
       data: {
         'messagesCount': match.messagesCount + 1,
         'lastMessage': message.text,
-        'lastMessageSentAt': message.sentAt.millisecondsSinceEpoch,
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       },
     );

@@ -35,7 +35,7 @@ class LandlordReviewQueueScreen extends ConsumerWidget {
 
     try {
       // The match is created first so the pending like still exists while the
-      // Firestore rule verifies it; the queue entry is closed afterwards.
+      // RLS insert policy verifies it; the queue entry is closed afterwards.
       await ref.read(matchesRepositoryProvider).createMatch(match);
       await ref.read(listingsRepositoryProvider).markLikeApproved(
             listingId: listing.id,

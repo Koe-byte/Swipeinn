@@ -26,8 +26,10 @@ PRD-HARDENED-MVP.md
 GLOSSARY.md
 
 # Local build / tool caches
-.firebase/
 android/.kotlin/
+
+# Backend credentials (publishable key shipped to the client, still not in git)
+supabase.env.json
 
 # Signing secrets
 android/key.properties

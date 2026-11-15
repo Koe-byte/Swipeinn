@@ -4,7 +4,7 @@ import '../../../core/services/database_service.dart';
 import '../domain/listing_model.dart';
 
 final listingsRepositoryProvider = Provider<ListingsRepository>((ref) {
-  return FirestoreListingsRepository();
+  return SupabaseListingsRepository();
 });
 
 /// Listings, the likes attached to them, and the status of a published place.
@@ -43,7 +43,7 @@ abstract class ListingsRepository {
   });
 }
 
-class FirestoreListingsRepository implements ListingsRepository {
+class SupabaseListingsRepository implements ListingsRepository {
   final DatabaseService _db = DatabaseService.instance;
 
   @override

@@ -1,12 +1,14 @@
-import 'package:firebase_core/firebase_core.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'core/config/supabase_config.dart';
 import 'core/navigation/app_router.dart';
 import 'core/services/database_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/navigation/presentation/main_navigation_shell.dart';
-import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,15 +16,19 @@ Future<void> main() async {
 
   String? startupError;
   try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
+    SupabaseConfig.assertConfigured();
+    await Supabase.initialize(
+      url: SupabaseConfig.url,
+      publishableKey: SupabaseConfig.publishableKey,
     );
-    debugPrint('[Firebase] Initialized with DefaultFirebaseOptions.');
+    debugPrint('[Supabase] Initialized ${SupabaseConfig.url}');
+    // Replay anything that failed while the device was offline last session.
+    unawaited(DatabaseService.instance.flushPendingWrites());
   } catch (error) {
     // There is no offline substitute for sign-in: surface the failure instead
     // of pretending the app is usable.
     startupError = error.toString();
-    debugPrint('[Firebase] Initialization failed: $error');
+    debugPrint('[Supabase] Initialization failed: $error');
   }
 
   runApp(
@@ -73,7 +79,7 @@ class _StartupFailureScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               const Text(
-                'The app could not connect to Firebase. Check your connection, then reopen the app.',
+                'The app could not connect to Supabase. Check your connection, then reopen the app.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppTheme.textSecondary),
               ),

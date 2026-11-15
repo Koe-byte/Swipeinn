@@ -202,7 +202,7 @@ class _LandingFeature extends StatelessWidget {
   }
 }
 
-/// Shown only while the persisted Firebase session is being restored.
+/// Shown only while the persisted Supabase session is being restored.
 class AuthSplashScreen extends StatelessWidget {
   const AuthSplashScreen({Key? key}) : super(key: key);
 

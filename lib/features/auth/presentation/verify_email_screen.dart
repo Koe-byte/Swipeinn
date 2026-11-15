@@ -5,7 +5,11 @@ import '../../../core/theme/app_theme.dart';
 import 'auth_provider.dart';
 import 'auth_ui.dart';
 
-/// Blocks the app until Firebase reports `emailVerified`.
+/// Blocks the app until Supabase reports a confirmed address.
+///
+/// Dormant while "Confirm email" is disabled on the project: sign-up arrives
+/// already confirmed, so the gate never routes here. Kept for the day email
+/// confirmation is turned back on.
 class VerifyEmailScreen extends ConsumerWidget {
   const VerifyEmailScreen({Key? key}) : super(key: key);
 
