@@ -80,18 +80,29 @@ flutter build web --release --dart-define-from-file=supabase.env.json
 "could not connect" screen instead of failing silently, because
 `SupabaseConfig.assertConfigured()` runs before `Supabase.initialize`.
 
-## 5. Web hosting (Cloudflare Pages)
+## 5. Web hosting (Cloudflare Workers)
+
+The site is deployed as a Worker with static assets, driven by `wrangler.jsonc`
+at the repo root:
 
 | Setting | Value |
 | --- | --- |
-| Build command | `flutter build web --release --dart-define-from-file=supabase.env.json` |
-| Output directory | `build/web` |
-| Env vars | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` |
+| Build command | `flutter build web --release --dart-define=SUPABASE_URL=$SUPABASE_URL --dart-define=SUPABASE_PUBLISHABLE_KEY=$SUPABASE_PUBLISHABLE_KEY` |
+| Deploy command | `npx wrangler deploy` |
+| Assets directory | `./build/web` (from `wrangler.jsonc`) |
+| Build env vars | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` |
 
-Cloudflare needs the two values as build environment variables so the build
-command can be shortened to `flutter build web --release` with
-`--dart-define=SUPABASE_URL=$SUPABASE_URL` style flags, or the env file can be
-written during the build. `web/_redirects` already contains the SPA fallback.
+Two details that are easy to get wrong:
+
+- `SupabaseConfig` reads `String.fromEnvironment`, which only understands
+  `--dart-define`. Setting the two environment variables in the Cloudflare
+  dashboard is not enough on its own; the build command has to forward them as
+  `--dart-define=...` as shown above (or write `supabase.env.json` during the
+  build and use `--dart-define-from-file`).
+- SPA routing comes from `"not_found_handling": "single-page-application"` in
+  `wrangler.jsonc`. Do **not** add `/* /index.html 200` to a `_redirects` file:
+  Workers rejects it as an infinite loop because it strips `.html` from the
+  target and matches the rule again. That rule is only valid on Pages.
 
 ## 6. Photo uploads
 

@@ -1,0 +1,14 @@
+{
+  // Cloudflare Workers static assets. `wrangler deploy` uploads the Flutter
+  // web build from this directory.
+  "name": "swipeinn",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./build/web",
+    // Named routes are resolved inside the Dart app, so every unknown path
+    // must serve index.html with a 200. Doing this here, rather than with a
+    // `_redirects` rule, is what keeps Workers from flagging an infinite
+    // loop: Workers would strip `.html` from the target and re-match the rule.
+    "not_found_handling": "single-page-application"
+  }
+}

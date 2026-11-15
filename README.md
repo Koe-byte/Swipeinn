@@ -76,7 +76,7 @@ account.
 - Project ref: `bjvsuzpqnzpdacxreqrl`
 - API URL: `https://bjvsuzpqnzpdacxreqrl.supabase.co`
 - Android package: `com.swipeinn.app`
-- Hosted web app: Cloudflare Pages (`build/web`)
+- Hosted web app: Cloudflare Workers static assets (`build/web`, `wrangler.jsonc`)
 
 See [`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md) for setup details.
 

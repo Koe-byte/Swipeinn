@@ -1,3 +1,0 @@
-# Cloudflare Pages serves this Flutter web build. Named routes are resolved by
-# the Dart router inside the SPA, so every path must fall through to index.html.
-/*    /index.html   200

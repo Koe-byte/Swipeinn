@@ -75,7 +75,10 @@ The client ships a publishable key, which is fine — RLS is the boundary.
   only, 5 MB.
 - **Web hosting left Firebase too.** `firebase.json`, `.firebaserc` and the
   FlutterFire Gradle plugins are gone; the web build is served from Cloudflare
-  Pages with a SPA fallback in `web/_redirects`.
+  Workers static assets, with SPA routing from `wrangler.jsonc`
+  (`not_found_handling: single-page-application`). A `_redirects` rule would
+  have been simpler, but Workers rejects `/* /index.html 200` as an infinite
+  loop because it strips `.html` from the target.
 - **The free tier pauses idle projects.** A Supabase free project is paused after
   about a week of inactivity, which is acceptable for a demo and not acceptable
   for a live marketplace.
