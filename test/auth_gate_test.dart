@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:swipeinn/features/auth/domain/user_model.dart';
@@ -231,6 +233,65 @@ void main() {
       final state = container.read(authStateProvider);
       expect(state.errorMessage, isNotNull);
       expect(state.isSubmitting, isFalse);
+    });
+
+    test('a profile photo upload stores the URL and removal clears it',
+        () async {
+      final fake = FakeAuthRepository(
+        initialIdentity: const AuthIdentity(
+          uid: 'uid-1',
+          email: 'renter@example.com',
+          displayName: 'Renter',
+          isEmailVerified: true,
+        ),
+        initialProfile: _completeProfile,
+      );
+      final container = _containerFor(fake);
+      await pumpEventQueue();
+
+      final notifier = container.read(authStateProvider.notifier);
+      final uploadError = await notifier.updateProfilePhoto(
+        bytes: Uint8List.fromList([1, 2, 3]),
+        fileName: 'me.png',
+      );
+      await pumpEventQueue();
+
+      expect(uploadError, isNull);
+      expect(fake.avatarsUploaded, 1);
+      expect(
+        container.read(authStateProvider).user?.photoUrl,
+        contains('me.png'),
+      );
+      expect(container.read(authStateProvider).isEmailVerified, isTrue);
+
+      final removalError = await notifier.removeProfilePhoto();
+      await pumpEventQueue();
+
+      expect(removalError, isNull);
+      expect(fake.avatarsRemoved, 1);
+      expect(container.read(authStateProvider).user?.photoUrl, isEmpty);
+    });
+
+    test('resending verification targets the signed-in email', () async {
+      final fake = FakeAuthRepository();
+      final container = _containerFor(fake);
+      await pumpEventQueue();
+
+      await container.read(authStateProvider.notifier).signUp(
+            email: 'new@example.com',
+            password: 'secret123',
+            displayName: 'New Person',
+          );
+      await pumpEventQueue();
+
+      final sent = await container
+          .read(authStateProvider.notifier)
+          .resendVerificationEmail();
+      await pumpEventQueue();
+
+      expect(sent, isTrue);
+      expect(fake.lastVerificationEmail, 'new@example.com');
+      expect(container.read(authStateProvider).isEmailVerified, isFalse);
     });
   });
 }

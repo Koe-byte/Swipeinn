@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:swipeinn/features/auth/data/auth_repository.dart';
 import 'package:swipeinn/features/auth/domain/auth_state.dart';
@@ -27,6 +28,11 @@ class FakeAuthRepository implements AuthRepository {
   int profileSaves = 0;
   int verificationEmailsSent = 0;
   int passwordResetsSent = 0;
+  int avatarsUploaded = 0;
+  int avatarsRemoved = 0;
+
+  /// Verification address recorded by the last [sendEmailVerification].
+  String? lastVerificationEmail;
 
   @override
   AuthIdentity? get currentIdentity => _current;
@@ -98,8 +104,9 @@ class FakeAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> sendEmailVerification() async {
+  Future<void> sendEmailVerification({String? email}) async {
     verificationEmailsSent++;
+    lastVerificationEmail = email ?? _current?.email;
   }
 
   @override
@@ -124,6 +131,28 @@ class FakeAuthRepository implements AuthRepository {
   Future<void> saveProfile(UserModel user) async {
     profileSaves++;
     profile = user;
+  }
+
+  @override
+  Future<UserModel> updateProfilePhoto({
+    required UserModel user,
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    avatarsUploaded++;
+    final updated = user.copyWith(
+      photoUrl: 'https://fake.test/avatars/${user.uid}/$fileName',
+    );
+    profile = updated;
+    return updated;
+  }
+
+  @override
+  Future<UserModel> clearProfilePhoto(UserModel user) async {
+    avatarsRemoved++;
+    final updated = user.copyWith(photoUrl: '');
+    profile = updated;
+    return updated;
   }
 
   @override

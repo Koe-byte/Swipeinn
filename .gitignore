@@ -27,6 +27,7 @@ GLOSSARY.md
 
 # Local build / tool caches
 android/.kotlin/
+.wrangler/
 
 # Backend credentials (publishable key shipped to the client, still not in git)
 supabase.env.json

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/navigation/route_names.dart';
+import '../../../core/services/photo_storage_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/domain/user_model.dart';
 import '../../auth/presentation/auth_provider.dart';
@@ -62,6 +64,110 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _editPhoto(BuildContext context, WidgetRef ref) async {
+    final user = ref.read(authStateProvider).user;
+    if (user == null) return;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              key: const Key('profile_photo_choose'),
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, 'choose'),
+            ),
+            if (user.photoUrl.isNotEmpty)
+              ListTile(
+                key: const Key('profile_photo_remove'),
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Remove photo'),
+                onTap: () => Navigator.pop(sheetContext, 'remove'),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted || action == null) return;
+
+    final notifier = ref.read(authStateProvider.notifier);
+
+    if (action == 'remove') {
+      final error = await notifier.removeProfilePhoto();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error ?? 'Profile photo removed.')),
+      );
+      return;
+    }
+
+    XFile? picked;
+    try {
+      picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+        maxWidth: 900,
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open the photo picker: $error')),
+      );
+      return;
+    }
+    if (picked == null || !context.mounted) return;
+
+    final bytes = await picked.readAsBytes();
+    if (!context.mounted) return;
+    if (bytes.lengthInBytes > PhotoStorageService.maxBytes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That photo is larger than 5 MB.')),
+      );
+      return;
+    }
+
+    final error = await notifier.updateProfilePhoto(
+      bytes: bytes,
+      fileName: picked.name,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error ?? 'Profile photo updated.')),
+    );
+  }
+
+  Future<void> _sendVerificationEmail(
+    BuildContext context,
+    WidgetRef ref,
+    String email,
+  ) async {
+    final notifier = ref.read(authStateProvider.notifier);
+    final sent = await notifier.resendVerificationEmail();
+    if (!context.mounted) return;
+
+    final message = sent
+        ? 'Verification link sent to $email. Open it, then tap Refresh.'
+        : (ref.read(authStateProvider).errorMessage ??
+            'Could not send the verification link.');
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: sent
+            ? SnackBarAction(
+                label: 'Refresh',
+                onPressed: notifier.refreshVerification,
+              )
+            : null,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(authStateProvider).user;
@@ -75,19 +181,9 @@ class ProfileScreen extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Center(
-              child: CircleAvatar(
-                radius: 44,
-                backgroundColor: AppTheme.primaryAmber,
-                child: Text(
-                  user?.displayName.isNotEmpty == true
-                      ? user!.displayName[0].toUpperCase()
-                      : 'S',
-                  style: const TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.navyDark,
-                  ),
-                ),
+              child: _ProfileAvatar(
+                user: user,
+                onTap: user == null ? null : () => _editPhoto(context, ref),
               ),
             ),
             const SizedBox(height: 12),
@@ -215,6 +311,16 @@ class ProfileScreen extends ConsumerWidget {
                         color: AppTheme.navyDark),
                     title: const Text('Email'),
                     subtitle: Text(user?.email ?? ''),
+                    trailing: _EmailVerificationStatus(
+                      verified: ref.watch(authStateProvider).isEmailVerified,
+                      onVerify: user == null
+                          ? null
+                          : () => _sendVerificationEmail(
+                                context,
+                                ref,
+                                user.email,
+                              ),
+                    ),
                   ),
                   if ((user?.createdAt ?? 0) > 0)
                     ListTile(
@@ -238,6 +344,104 @@ class ProfileScreen extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Round avatar with the camera affordance that opens the photo sheet.
+class _ProfileAvatar extends StatelessWidget {
+  final UserModel? user;
+  final VoidCallback? onTap;
+
+  const _ProfileAvatar({required this.user, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final photoUrl = user?.photoUrl ?? '';
+    final initial = user?.displayName.isNotEmpty == true
+        ? user!.displayName[0].toUpperCase()
+        : 'S';
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        CircleAvatar(
+          radius: 44,
+          backgroundColor: AppTheme.primaryAmber,
+          // foregroundImage draws over the initial once the bytes arrive and
+          // silently falls back to it if the URL cannot be loaded.
+          foregroundImage: photoUrl.isEmpty ? null : NetworkImage(photoUrl),
+          onForegroundImageError: photoUrl.isEmpty ? null : (_, __) {},
+          child: Text(
+            initial,
+            style: const TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.navyDark,
+            ),
+          ),
+        ),
+        Positioned(
+          right: -2,
+          bottom: -2,
+          child: Material(
+            color: AppTheme.navyDark,
+            shape: const CircleBorder(),
+            elevation: 2,
+            child: InkWell(
+              key: const Key('profile_photo_button'),
+              customBorder: const CircleBorder(),
+              onTap: onTap,
+              child: const Padding(
+                padding: EdgeInsets.all(7),
+                child: Icon(
+                  Icons.photo_camera_outlined,
+                  size: 18,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// "Verified" badge, or the button that sends the confirmation link.
+class _EmailVerificationStatus extends StatelessWidget {
+  final bool verified;
+  final VoidCallback? onVerify;
+
+  const _EmailVerificationStatus({
+    required this.verified,
+    required this.onVerify,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (verified) {
+      return const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.check_circle, size: 18, color: AppTheme.likeGreen),
+          SizedBox(width: 4),
+          Text(
+            'Verified',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.likeGreen,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return TextButton(
+      key: const Key('profile_verify_email'),
+      onPressed: onVerify,
+      child: const Text('Verify'),
     );
   }
 }

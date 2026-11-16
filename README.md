@@ -14,9 +14,12 @@ Phase 4: Supabase backend.
 - Listings, likes, matches and messages live in five Postgres tables behind Row
   Level Security. `DatabaseService` keeps its offline mirror and now queues
   failed writes for replay instead of relying on Firestore's built-in queue.
-- **Photo upload works.** Owners pick up to five images in the publish/edit form;
-  they upload to the `listing-photos` bucket on save and render everywhere a
-  listing appears.
+- **Photos and avatars upload to Supabase Storage.** Owners pick up to five
+  images in the publish/edit form; they upload to the `listing-photos` bucket on
+  save and render everywhere a listing appears. The profile picture uploads to
+  the `avatars` bucket and is stored as `users.photoUrl`.
+- The profile also shows the account email with its verification state; when
+  Supabase reports an unconfirmed address, the row can resend the link.
 - Subcollections became flat tables: `listing_likes` and `messages` carry a
   foreign key instead of a parent path.
 

@@ -1,7 +1,11 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 import '../../../core/services/database_service.dart';
+import '../../../core/services/photo_storage_service.dart';
 import '../domain/auth_state.dart';
 import '../domain/user_model.dart';
 
@@ -32,7 +36,9 @@ abstract class AuthRepository {
 
   Future<void> signOut();
 
-  Future<void> sendEmailVerification();
+  /// Sends the Supabase confirmation link. [email] falls back to the signed-in
+  /// account, which is what the verification screen uses.
+  Future<void> sendEmailVerification({String? email});
 
   /// Re-reads the user record so a freshly clicked verification link is seen.
   Future<AuthIdentity> reloadIdentity();
@@ -42,6 +48,17 @@ abstract class AuthRepository {
   Future<UserModel?> fetchProfile(String uid);
 
   Future<void> saveProfile(UserModel user);
+
+  /// Uploads a new profile picture, saves its URL on the profile, and deletes
+  /// the previous object. Returns the profile with the new [photoUrl].
+  Future<UserModel> updateProfilePhoto({
+    required UserModel user,
+    required Uint8List bytes,
+    required String fileName,
+  });
+
+  /// Clears [UserModel.photoUrl] and deletes the stored object.
+  Future<UserModel> clearProfilePhoto(UserModel user);
 
   /// Renames the account in Supabase Auth and mirrors the new name onto the
   /// profile row.
@@ -111,10 +128,12 @@ class SupabaseAuthRepository implements AuthRepository {
   Future<void> signOut() => _client.auth.signOut();
 
   @override
-  Future<void> sendEmailVerification() async {
-    final email = _client.auth.currentUser?.email;
-    if (email == null) throw StateError('No signed-in user to verify.');
-    await _client.auth.resend(type: OtpType.signup, email: email);
+  Future<void> sendEmailVerification({String? email}) async {
+    final target = (email ?? _client.auth.currentUser?.email)?.trim();
+    if (target == null || target.isEmpty) {
+      throw StateError('No email address to verify.');
+    }
+    await _client.auth.resend(type: OtpType.signup, email: target);
   }
 
   @override
@@ -159,6 +178,44 @@ class SupabaseAuthRepository implements AuthRepository {
       docId: user.uid,
       data: map,
     );
+  }
+
+  @override
+  Future<UserModel> updateProfilePhoto({
+    required UserModel user,
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    final photoUrl = await PhotoStorageService.instance.uploadAvatar(
+      uid: user.uid,
+      bytes: bytes,
+      fileName: fileName,
+    );
+
+    final updated = user.copyWith(photoUrl: photoUrl);
+    await saveProfile(updated);
+
+    // Only after the new URL is durable: deleting first would leave the
+    // profile pointing at an object that no longer exists if the save failed.
+    if (user.photoUrl.isNotEmpty && user.photoUrl != photoUrl) {
+      unawaited(
+        PhotoStorageService.instance.deleteAvatarByUrl(user.photoUrl),
+      );
+    }
+
+    return updated;
+  }
+
+  @override
+  Future<UserModel> clearProfilePhoto(UserModel user) async {
+    final updated = user.copyWith(photoUrl: '');
+    await saveProfile(updated);
+
+    if (user.photoUrl.isNotEmpty) {
+      unawaited(PhotoStorageService.instance.deleteAvatarByUrl(user.photoUrl));
+    }
+
+    return updated;
   }
 
   @override

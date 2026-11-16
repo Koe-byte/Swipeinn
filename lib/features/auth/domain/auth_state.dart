@@ -44,6 +44,11 @@ class AuthState {
   final String? email;
   final String? errorMessage;
 
+  /// Mirrors `email_confirmed_at` on the Supabase user. Displaying it is the
+  /// only job: the gate already routes unverified sessions to the verify
+  /// screen, so the profile only ever sees this when it is true.
+  final bool isEmailVerified;
+
   /// Non-error notice, such as "verification email sent".
   final String? infoMessage;
 
@@ -56,6 +61,7 @@ class AuthState {
     this.status = AuthStatus.restoring,
     this.user,
     this.email,
+    this.isEmailVerified = false,
     this.errorMessage,
     this.infoMessage,
     this.isSubmitting = false,
@@ -70,6 +76,7 @@ class AuthState {
     AuthStatus? status,
     UserModel? user,
     String? email,
+    bool? isEmailVerified,
     String? errorMessage,
     String? infoMessage,
     bool clearError = false,
@@ -81,6 +88,7 @@ class AuthState {
       status: status ?? this.status,
       user: clearUser ? null : (user ?? this.user),
       email: email ?? this.email,
+      isEmailVerified: isEmailVerified ?? this.isEmailVerified,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       infoMessage: clearInfo ? null : (infoMessage ?? this.infoMessage),
       isSubmitting: isSubmitting ?? this.isSubmitting,

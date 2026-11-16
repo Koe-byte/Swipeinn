@@ -216,7 +216,13 @@ class _ListingEditorScreenState extends ConsumerState<ListingEditorScreen> {
         _saving = false;
       });
       messenger.showSnackBar(
-        SnackBar(content: Text('Could not save this listing: $error')),
+        SnackBar(
+          content: Text(
+            error is PhotoUploadException
+                ? error.message
+                : 'Could not save this listing: $error',
+          ),
+        ),
       );
     }
   }

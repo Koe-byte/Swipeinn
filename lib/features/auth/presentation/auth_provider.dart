@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/photo_storage_service.dart';
 import '../data/auth_repository.dart';
 import '../domain/auth_state.dart';
 import '../domain/user_model.dart';
@@ -104,6 +105,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       state = AuthState(
         status: AuthStatus.unverified,
         email: identity.email,
+        isEmailVerified: false,
         isSubmitting: false,
       );
       return;
@@ -145,6 +147,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         status: needsOnboarding ? AuthStatus.needsOnboarding : AuthStatus.ready,
         user: profile,
         email: identity.email,
+        isEmailVerified: true,
         isSubmitting: false,
       );
     } catch (error) {
@@ -224,21 +227,24 @@ class AuthNotifier extends StateNotifier<AuthState> {
   // Email verification
   // ---------------------------------------------------------------------------
 
-  Future<void> resendVerificationEmail() async {
+  Future<bool> resendVerificationEmail() async {
+    final email = state.email ?? state.user?.email;
     state =
         state.copyWith(isSubmitting: true, clearError: true, clearInfo: true);
     try {
-      await _repo.sendEmailVerification();
+      await _repo.sendEmailVerification(email: email);
       state = state.copyWith(
         isSubmitting: false,
         infoMessage:
             'Verification email sent. Check your inbox and spam folder.',
       );
+      return true;
     } catch (error) {
       state = state.copyWith(
         isSubmitting: false,
         errorMessage: authErrorMessage(error),
       );
+      return false;
     }
   }
 
@@ -348,6 +354,58 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
       return false;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Profile photo
+  // ---------------------------------------------------------------------------
+
+  /// Uploads a new avatar and mirrors its URL onto the profile.
+  ///
+  /// Returns `null` on success, or a sentence ready for a snackbar.
+  Future<String?> updateProfilePhoto({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    final current = state.user;
+    if (current == null) return 'Sign in again to change your photo.';
+
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    try {
+      final updated = await _repo.updateProfilePhoto(
+        user: current,
+        bytes: bytes,
+        fileName: fileName,
+      );
+      state = state.copyWith(user: updated, isSubmitting: false);
+      return null;
+    } catch (error) {
+      debugPrint('[Auth] Photo upload failed: $error');
+      state = state.copyWith(isSubmitting: false);
+      return _photoErrorMessage(error);
+    }
+  }
+
+  /// Removes the stored avatar and falls back to the initial letter.
+  Future<String?> removeProfilePhoto() async {
+    final current = state.user;
+    if (current == null) return 'Sign in again to change your photo.';
+
+    state = state.copyWith(isSubmitting: true, clearError: true);
+    try {
+      final updated = await _repo.clearProfilePhoto(current);
+      state = state.copyWith(user: updated, isSubmitting: false);
+      return null;
+    } catch (error) {
+      debugPrint('[Auth] Photo removal failed: $error');
+      state = state.copyWith(isSubmitting: false);
+      return 'Could not remove your photo. Check your connection and try again.';
+    }
+  }
+
+  static String _photoErrorMessage(Object error) {
+    if (error is PhotoUploadException) return error.message;
+    return 'Could not update your photo. Check your connection and try again.';
   }
 
   // ---------------------------------------------------------------------------

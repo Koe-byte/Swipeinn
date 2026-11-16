@@ -34,8 +34,8 @@ the hot data path for no benefit to any caller.
 ## Security
 
 `firestore.rules` and `storage.rules` became RLS policies in
-`supabase/migrations/0002_security.sql` and `0003_storage_realtime.sql`. Two
-translations were not mechanical:
+`supabase/migrations/0002_security.sql`, `0003_storage_realtime.sql` and
+`0004_storage_avatars.sql`. Two translations were not mechanical:
 
 - Firestore read `email_verified` from the ID token. The Supabase JWT has no such
   claim, so `public.is_verified()` is a `security definer` function reading
@@ -69,10 +69,11 @@ The client ships a publishable key, which is fine — RLS is the boundary.
   to the account, and repositories already sorted client-side to avoid composite
   indexes. At marketplace scale this is one subscription per screen, matching the
   previous listener count.
-- **Photo storage is public-read, write-own-folder.** The bucket holds no
-  private data — listing photos are shown to every signed-in account anyway.
-  Uploads are still restricted to `users/{uid}/listings/{listingId}/...`, images
-  only, 5 MB.
+- **Photo storage is public-read, write-own-folder.** The buckets hold no
+  private data — listing photos and avatars are shown to other accounts anyway.
+  Uploads are still restricted to `users/{uid}/...`, images only, 5 MB.
+  `listing-photos` uses `users/{uid}/listings/{listingId}/...`; `avatars` uses
+  `users/{uid}/avatar_{timestamp}.{ext}`.
 - **Web hosting left Firebase too.** `firebase.json`, `.firebaserc` and the
   FlutterFire Gradle plugins are gone; the web build is served from Cloudflare
   Workers static assets, with SPA routing from `wrangler.jsonc`
