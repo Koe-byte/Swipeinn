@@ -100,6 +100,7 @@ class DatabaseService {
     'users': _TableSpec('users', ['uid']),
     'listings': _TableSpec('listings', ['id']),
     'listing_likes': _TableSpec('listing_likes', ['listingId', 'requesterUid']),
+    'listing_passes': _TableSpec('listing_passes', ['id']),
     'matches': _TableSpec('matches', ['id']),
     'messages': _TableSpec('messages', ['id']),
   };
@@ -147,6 +148,8 @@ class DatabaseService {
     'settings',
     'matches',
     'listings',
+    'listing_likes',
+    'listing_passes',
   };
   // v4 is the Supabase generation. The prefix bump is deliberate: a v3 cache
   // holds Firestore-era rows keyed by Firebase uids, and restoring those would
@@ -212,8 +215,8 @@ class DatabaseService {
         if (decoded is List) {
           for (final entry in decoded) {
             if (entry is Map) {
-              _pendingWrites
-                  .add(_PendingWrite.fromJson(Map<String, dynamic>.from(entry)));
+              _pendingWrites.add(
+                  _PendingWrite.fromJson(Map<String, dynamic>.from(entry)));
             }
           }
         }
@@ -330,8 +333,7 @@ class DatabaseService {
   // Cloud write plumbing
   // ---------------------------------------------------------------------------
 
-  static Map<String, Object> _documentFilter(
-      _TableSpec spec, String docId) {
+  static Map<String, Object> _documentFilter(_TableSpec spec, String docId) {
     if (spec.primaryKey.length != 1) {
       throw StateError(
           'Collection ${spec.table} needs a composite key and has no root rows.');
@@ -451,7 +453,8 @@ class DatabaseService {
     _PendingWrite write,
   ) async {
     if (write.kind == _WriteKind.subdocument) {
-      final spec = _subcollections['${write.collection}/${write.subcollection}'];
+      final spec =
+          _subcollections['${write.collection}/${write.subcollection}'];
       if (spec == null) return;
       final parentId = write.parentId;
       if (parentId == null) return;
@@ -472,7 +475,11 @@ class DatabaseService {
     final filter = _documentFilter(spec, write.docId);
 
     if (write.kind == _WriteKind.delete) {
-      await client.from(spec.table).delete().match(filter).timeout(_writeTimeout);
+      await client
+          .from(spec.table)
+          .delete()
+          .match(filter)
+          .timeout(_writeTimeout);
       return;
     }
 
@@ -517,6 +524,19 @@ class DatabaseService {
       debugPrint('[DatabaseService] Replayed ${queued.length - failed} '
           'pending write(s); $failed still queued.');
     }
+  }
+
+  /// Runs one Postgres function through PostgREST.
+  ///
+  /// Returns `null` when no Supabase client is configured, which lets
+  /// repositories fall back to the local mirror in tests and offline builds.
+  Future<dynamic> callRpc(
+    String function, {
+    Map<String, dynamic> params = const {},
+  }) {
+    final client = _client;
+    if (client == null) return Future.value(null);
+    return client.rpc(function, params: params).timeout(_writeTimeout);
   }
 
   // --- Document Operations ---
@@ -600,7 +620,8 @@ class DatabaseService {
       await client
           .from(spec.table)
           .delete()
-          .match(_documentFilter(spec, docId)).timeout(_writeTimeout);
+          .match(_documentFilter(spec, docId))
+          .timeout(_writeTimeout);
       unawaited(flushPendingWrites());
       return true;
     } catch (e) {
@@ -633,7 +654,8 @@ class DatabaseService {
             .maybeSingle()
             .timeout(_readTimeout);
         if (data != null) {
-          final resolved = _preferNewest(Map<String, dynamic>.from(data), local);
+          final resolved =
+              _preferNewest(Map<String, dynamic>.from(data), local);
           _localCollections.putIfAbsent(collection, () => {})[docId] = resolved;
           unawaited(_persistCollection(collection));
           return resolved;
@@ -665,6 +687,40 @@ class DatabaseService {
       await _ensureLocalCacheLoaded().timeout(const Duration(seconds: 3));
     } catch (e) {
       debugPrint('[DatabaseService] Local cache initialization timed out: $e');
+    }
+  }
+
+  /// Drops conversation data and queued private writes when the account ends.
+  ///
+  /// Profiles and public listings stay cached so offline browsing keeps
+  /// working, but matches, messages, likes and the pending-write queue belong
+  /// to the account that created them. Leaving them behind on a shared device
+  /// could show the next account stale private rows or replay its writes as
+  /// the wrong user.
+  Future<void> clearPrivateState() async {
+    _localCollections['matches'] = {};
+    _localCollections['listing_likes'] = {};
+    _localCollections['listing_passes'] = {};
+    _localSubcollections.clear();
+    _pendingWrites.clear();
+
+    _notifyCollection('matches');
+    _notifyCollection('listing_likes');
+    _notifyCollection('listing_passes');
+    for (final path
+        in _colControllers.keys.where((key) => key.contains('/')).toList()) {
+      _notifyCollection(path);
+    }
+
+    if (_persistenceDisabledForTesting) return;
+    try {
+      await _cacheStore.remove('${_cacheKeyPrefix}matches');
+      await _cacheStore.remove('${_cacheKeyPrefix}listing_likes');
+      await _cacheStore.remove('${_cacheKeyPrefix}listing_passes');
+      await _cacheStore.remove(_subcollectionCacheKey);
+      await _cacheStore.remove(_pendingWritesKey);
+    } catch (e) {
+      debugPrint('[DatabaseService] Private cache clear skipped: $e');
     }
   }
 
@@ -755,9 +811,8 @@ class DatabaseService {
           .stream(primaryKey: spec.primaryKey)
           .eq(spec.primaryKey.first, docId);
       await for (final batch in rows) {
-        final row = batch.isEmpty
-            ? null
-            : Map<String, dynamic>.from(batch.first);
+        final row =
+            batch.isEmpty ? null : Map<String, dynamic>.from(batch.first);
         if (row != null) {
           final resolved =
               _preferNewest(row, _localCollections[collection]?[docId]);
@@ -802,8 +857,7 @@ class DatabaseService {
     try {
       await for (final rows
           in client.from(spec.table).stream(primaryKey: spec.primaryKey)) {
-        final docs =
-            rows.map((row) => Map<String, dynamic>.from(row)).toList();
+        final docs = rows.map((row) => Map<String, dynamic>.from(row)).toList();
         final store = _localCollections.putIfAbsent(collection, () => {});
         for (final doc in docs) {
           final id = _documentId(spec, doc);
@@ -830,6 +884,33 @@ class DatabaseService {
         '[DatabaseService] Supabase collection stream failed for '
         '$collection, using local store: $e',
       );
+
+      // Realtime can fail while the REST API still works (disabled
+      // publication, websocket blocked by a proxy, expired channel auth).
+      // Pull one full snapshot before falling back: otherwise the local mirror
+      // only contains rows this device wrote, which makes Discover look like it
+      // only ever shows the signed-in account's listings.
+      try {
+        final rows =
+            await client.from(spec.table).select().timeout(_readTimeout);
+        final docs = rows.map((row) => Map<String, dynamic>.from(row)).toList();
+        final store = _localCollections.putIfAbsent(collection, () => {});
+        for (final doc in docs) {
+          final id = _documentId(spec, doc);
+          if (id.isNotEmpty) store[id] = doc;
+        }
+        unawaited(_persistCollection(collection));
+        debugPrint(
+          '[DatabaseService] Recovered $collection snapshot via REST '
+          '(${docs.length} rows).',
+        );
+      } catch (snapshotError) {
+        debugPrint(
+          '[DatabaseService] REST snapshot also failed for '
+          '$collection: $snapshotError',
+        );
+      }
+
       yield* _localCollectionStream(
         collection,
         whereField: whereField,
@@ -914,24 +995,50 @@ class DatabaseService {
 
   // --- Subcollection Operations (e.g. matches/{matchId}/messages) ---
 
-  Future<void> setSubdocument({
+  /// Merges a subdocument into the in-memory store without touching the cloud.
+  ///
+  /// Partial updates (accepting a proposal, approving a like) must not replace
+  /// the whole row: doing so used to wipe the message text and sender fields,
+  /// which made the proposal bubble disappear locally until Realtime caught up.
+  void cacheSubdocumentLocally({
+    required String parentCollection,
+    required String parentId,
+    required String subcollection,
+    required String docId,
+    required Map<String, dynamic> data,
+  }) {
+    final path = '$parentCollection/$parentId/$subcollection';
+    final store = _localSubcollections.putIfAbsent(path, () => {});
+    final existing = store[docId];
+    if (existing == null) {
+      store[docId] = Map<String, dynamic>.from(data);
+    } else {
+      existing.addAll(data);
+    }
+    _notifyCollection(path);
+    unawaited(_persistSubcollections());
+  }
+
+  Future<bool> setSubdocument({
     required String parentCollection,
     required String parentId,
     required String subcollection,
     required String docId,
     required Map<String, dynamic> data,
   }) async {
-    // 1. Immediately update local subcollection store
-    final path = '$parentCollection/$parentId/$subcollection';
-    _localSubcollections.putIfAbsent(path, () => {});
-    _localSubcollections[path]![docId] = Map<String, dynamic>.from(data);
-    _notifyCollection(path);
-    unawaited(_persistSubcollections());
+    // 1. Merge into the local subcollection store for zero-latency UI.
+    cacheSubdocumentLocally(
+      parentCollection: parentCollection,
+      parentId: parentId,
+      subcollection: subcollection,
+      docId: docId,
+      data: data,
+    );
 
-    // 2. Supabase sync with timeout if active
+    // 2. Supabase sync with timeout if active.
     final spec = _subcollections['$parentCollection/$subcollection'];
     final client = _client;
-    if (spec == null || client == null) return;
+    if (spec == null || client == null) return true;
 
     try {
       final filter = _subdocumentFilter(spec, parentId, docId);
@@ -944,6 +1051,7 @@ class DatabaseService {
         merge: true,
       );
       unawaited(flushPendingWrites());
+      return true;
     } catch (e) {
       debugPrint(
           '[DatabaseService] Supabase subdocument write failed; queued: $e');
@@ -955,6 +1063,7 @@ class DatabaseService {
         parentId: parentId,
         subcollection: subcollection,
       ));
+      return false;
     }
   }
 
@@ -1057,7 +1166,8 @@ class DatabaseService {
           .stream(primaryKey: spec.primaryKey)
           .eq(spec.parentColumn, parentId);
       await for (final batch in rows) {
-        final docs = batch.map((row) => Map<String, dynamic>.from(row)).toList();
+        final docs =
+            batch.map((row) => Map<String, dynamic>.from(row)).toList();
         _localSubcollections[path] = {
           for (final doc in docs) _subdocumentId(spec, doc): doc,
         };

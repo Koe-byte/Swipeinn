@@ -5,6 +5,9 @@ import 'matches_provider.dart';
 import '../../auth/presentation/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
 
+String _formatViewingDate(DateTime date) =>
+    '${date.month}/${date.day}/${date.year}';
+
 class ChatScreen extends ConsumerStatefulWidget {
   final MatchModel match;
   final String listingTitle;
@@ -21,12 +24,47 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
+  /// The reversed list keeps offset 0 at the newest message. The pill only
+  /// appears when the reader has scrolled up into history.
+  bool _showJumpToLatest = false;
 
   final List<String> _icebreakers = [
     'Hi! I am looking for a January move-in—when can I view the unit?',
     'Hello! Are utilities included in the monthly rent?',
     'Hi! Is this unit still available for an ocular visit this weekend?',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_handleScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_handleScroll);
+    _scrollController.dispose();
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    final shouldShow =
+        _scrollController.hasClients && _scrollController.offset > 120;
+    if (shouldShow == _showJumpToLatest) return;
+    setState(() => _showJumpToLatest = shouldShow);
+  }
+
+  void _scrollToLatest() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
 
   MatchModel _currentMatch() {
     final matches = ref.read(matchesProvider).valueOrNull ?? const [];
@@ -52,7 +90,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final isRequester = user != null && user.uid == currentMatch.requesterUid;
     final isMatchActive =
         currentMatch.status == MatchStatus.active && !currentMatch.isExpired;
-    final needsFirstMove = currentMatch.messagesCount == 0;
+    final confirmedDate = currentMatch.viewingStatus == ViewingStatus.confirmed
+        ? currentMatch.viewingDate
+        : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -81,21 +121,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: Column(
         children: [
-          // First-move banner: the requester opens the conversation.
-          if (needsFirstMove)
+          if (confirmedDate != null)
             Container(
+              key: const Key('viewing_confirmed_banner'),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: AppTheme.primaryAmber.withOpacity(0.18),
+              color: AppTheme.likeGreen.withOpacity(0.16),
               child: Row(
                 children: [
-                  const Icon(Icons.forum_outlined,
-                      color: AppTheme.navyDark, size: 20),
+                  const Icon(Icons.event_available,
+                      color: AppTheme.likeGreen, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      isRequester
-                          ? 'Send the first message to open this chat.'
-                          : 'Waiting for the renter to send the first message.',
+                      'Viewing confirmed for ${_formatViewingDate(confirmedDate)}.',
                       style: const TextStyle(
                           fontSize: 12, fontWeight: FontWeight.bold),
                     ),
@@ -106,76 +144,109 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
           // Messages View
           Expanded(
-            child: messages.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.chat_bubble_outline,
-                              size: 48, color: AppTheme.textSecondary),
-                          const SizedBox(height: 12),
-                          Text(
-                            isRequester
-                                ? 'Tap a quick icebreaker below or send a message to break the ice!'
-                                : 'The renter must make the first move.',
-                            textAlign: TextAlign.center,
-                            style:
-                                const TextStyle(color: AppTheme.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: messages.length,
-                    itemBuilder: (context, index) {
-                      final msg = messages[index];
-                      final isMe = msg.senderUid == (user?.uid ?? '');
-
-                      if (msg.type == MessageType.viewingProposal) {
-                        return _ViewingProposalBubble(
-                          msg: msg,
-                          isLandlord: !isRequester,
-                          onAccept: () => _acceptProposal(msg),
-                        );
-                      }
-
-                      return Align(
-                        alignment:
-                            isMe ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: isMe ? AppTheme.primaryAmber : Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.04),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              )
-                            ],
-                          ),
-                          child: Text(
-                            msg.text,
-                            style: TextStyle(
-                              color: isMe ? AppTheme.navyDark : Colors.black87,
-                              fontWeight: FontWeight.w500,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: messages.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24.0),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                Icon(Icons.chat_bubble_outline,
+                                    size: 48, color: AppTheme.textSecondary),
+                                SizedBox(height: 12),
+                                Text(
+                                  'Say hello or propose a viewing time to get started. '
+                                  'Either of you can send the first message.',
+                                  textAlign: TextAlign.center,
+                                  style:
+                                      TextStyle(color: AppTheme.textSecondary),
+                                ),
+                              ],
                             ),
                           ),
+                        )
+                      : ListView.builder(
+                          controller: _scrollController,
+                          // Newest first in the scroll model, bottom of the
+                          // screen in practice. Offset 0 is always the latest
+                          // message, so incoming messages stay in view.
+                          reverse: true,
+                          padding: const EdgeInsets.all(16),
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
+                            final msg = messages[messages.length - 1 - index];
+                            final isMe = msg.senderUid == (user?.uid ?? '');
+
+                            if (msg.type == MessageType.viewingProposal) {
+                              return _ViewingProposalBubble(
+                                msg: msg,
+                                isMine: isMe,
+                                canRespond: isMatchActive &&
+                                    !isMe &&
+                                    msg.proposalStatus == 'pending',
+                                onAccept: () =>
+                                    _respondToProposal(msg, 'accepted'),
+                                onDecline: () =>
+                                    _respondToProposal(msg, 'declined'),
+                              );
+                            }
+
+                            return Align(
+                              alignment: isMe
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color:
+                                      isMe ? AppTheme.primaryAmber : Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.04),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    )
+                                  ],
+                                ),
+                                child: Text(
+                                  msg.text,
+                                  style: TextStyle(
+                                    color: isMe
+                                        ? AppTheme.navyDark
+                                        : Colors.black87,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
+                ),
+                if (_showJumpToLatest && messages.isNotEmpty)
+                  Positioned(
+                    right: 16,
+                    bottom: 12,
+                    child: FloatingActionButton.small(
+                      heroTag: 'chat_jump_latest',
+                      tooltip: 'Jump to the latest message',
+                      backgroundColor: AppTheme.primaryAmber,
+                      foregroundColor: AppTheme.navyDark,
+                      onPressed: _scrollToLatest,
+                      child: const Icon(Icons.keyboard_arrow_down),
+                    ),
                   ),
+              ],
+            ),
           ),
 
-          // Requester icebreaker chips.
-          if (isRequester && needsFirstMove)
+          // Optional icebreakers for either side while the chat is empty.
+          if (messages.isEmpty && isMatchActive)
             Container(
               height: 48,
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -223,12 +294,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _messageController,
-                      enabled:
-                          isMatchActive && (!needsFirstMove || isRequester),
+                      enabled: isMatchActive,
                       decoration: InputDecoration(
-                        hintText: needsFirstMove && !isRequester
-                            ? 'Waiting for the renter...'
-                            : 'Type a message...',
+                        hintText: isMatchActive
+                            ? 'Type a message...'
+                            : 'This conversation is closed.',
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 10),
                         border: OutlineInputBorder(
@@ -243,7 +313,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   const SizedBox(width: 8),
                   IconButton(
                     icon: const Icon(Icons.send, color: AppTheme.navyDark),
-                    onPressed: isMatchActive && (!needsFirstMove || isRequester)
+                    onPressed: isMatchActive
                         ? () {
                             final text = _messageController.text.trim();
                             if (text.isNotEmpty) {
@@ -262,9 +332,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  void _showSyncNotice() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Saved on this device. It will sync once the connection is back.',
+        ),
+      ),
+    );
+  }
+
+  void _showError(Object error) {
+    if (!mounted) return;
+    final message = error is StateError ? error.message : '$error';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('That did not go through: $message')),
+    );
+  }
+
   Future<void> _sendMessage(String text) async {
     final senderUid = _uid;
     if (senderUid == null) return;
+
+    // Sending from history should return to the newest message rather than
+    // leaving the new bubble off-screen.
+    _scrollToLatest();
 
     final now = DateTime.now();
     final message = MessageModel(
@@ -274,19 +367,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       sentAt: now,
     );
 
-    await ref.read(matchesRepositoryProvider).sendMessage(
-          match: _currentMatch(),
-          message: message,
-        );
+    try {
+      final synced = await ref.read(matchesRepositoryProvider).sendMessage(
+            match: _currentMatch(),
+            message: message,
+          );
+      if (!synced) _showSyncNotice();
+    } catch (error) {
+      _showError(error);
+    }
   }
 
-  Future<void> _acceptProposal(MessageModel msg) async {
-    await ref.read(matchesRepositoryProvider).updateProposal(
-          matchId: widget.match.id,
-          messageId: msg.id,
-          status: 'accepted',
-          viewingDate: msg.viewingDate,
-        );
+  Future<void> _respondToProposal(MessageModel msg, String status) async {
+    try {
+      final synced = await ref.read(matchesRepositoryProvider).updateProposal(
+            matchId: widget.match.id,
+            messageId: msg.id,
+            status: status,
+            viewingDate: msg.viewingDate,
+          );
+      if (!synced) _showSyncNotice();
+    } catch (error) {
+      _showError(error);
+    }
   }
 
   Future<void> _showScheduleViewingDialog(BuildContext context) async {
@@ -312,16 +415,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       sentAt: now,
     );
 
-    await ref.read(matchesRepositoryProvider).updateMatch(
-          match.copyWith(
-            viewingStatus: ViewingStatus.proposed,
-            viewingDate: pickedDate,
-          ),
-        );
-    await ref.read(matchesRepositoryProvider).sendMessage(
-          match: match,
-          message: message,
-        );
+    // The database trigger moves the match to "proposed" when the proposal
+    // message is inserted. There is no second client write that can fail.
+    try {
+      final synced = await ref.read(matchesRepositoryProvider).sendMessage(
+            match: match,
+            message: message,
+          );
+      if (!synced) _showSyncNotice();
+    } catch (error) {
+      _showError(error);
+    }
   }
 
   void _showSafetySheet(BuildContext context) {
@@ -348,12 +452,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 subtitle: const Text(
                     'Instantly closes this chat and prevents future card appearances.'),
                 onTap: () async {
-                  await ref.read(matchesRepositoryProvider).updateMatch(
+                  final synced = await ref
+                      .read(matchesRepositoryProvider)
+                      .updateMatch(
                         _currentMatch().copyWith(status: MatchStatus.unmatched),
                       );
                   if (!context.mounted) return;
+                  final messenger = ScaffoldMessenger.of(context);
                   Navigator.pop(ctx);
                   Navigator.pop(context);
+                  if (!synced) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Blocked on this device. It will sync once the '
+                          'connection is back.',
+                        ),
+                      ),
+                    );
+                  }
                 },
               ),
             ],
@@ -366,20 +483,87 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
 class _ViewingProposalBubble extends StatelessWidget {
   final MessageModel msg;
-  final bool isLandlord;
+  final bool isMine;
+  final bool canRespond;
   final VoidCallback onAccept;
+  final VoidCallback onDecline;
 
   const _ViewingProposalBubble({
     required this.msg,
-    required this.isLandlord,
+    required this.isMine,
+    required this.canRespond,
     required this.onAccept,
+    required this.onDecline,
   });
 
   @override
   Widget build(BuildContext context) {
     final dateStr = msg.viewingDate != null
-        ? '${msg.viewingDate!.month}/${msg.viewingDate!.day}/${msg.viewingDate!.year}'
+        ? _formatViewingDate(msg.viewingDate!)
         : 'Tomorrow';
+
+    final Widget status;
+    if (msg.proposalStatus == 'accepted') {
+      status = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppTheme.likeGreen,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          '✓ Viewing confirmed for $dateStr',
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+        ),
+      );
+    } else if (msg.proposalStatus == 'declined') {
+      status = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppTheme.passRed,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Text(
+          'Viewing declined',
+          style: TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+        ),
+      );
+    } else if (canRespond) {
+      status = Row(
+        children: [
+          OutlinedButton(
+            key: Key('decline_proposal_${msg.id}'),
+            onPressed: onDecline,
+            child: const Text('Decline'),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: ElevatedButton(
+              key: Key('accept_proposal_${msg.id}'),
+              onPressed: onAccept,
+              child: const Text('Accept Viewing Date'),
+            ),
+          ),
+        ],
+      );
+    } else if (isMine) {
+      status = const Text(
+        'Waiting for the other person to respond.',
+        style: TextStyle(
+            fontSize: 12,
+            color: AppTheme.textSecondary,
+            fontStyle: FontStyle.italic),
+      );
+    } else {
+      status = const Text(
+        'This proposal can no longer be answered.',
+        style: TextStyle(
+            fontSize: 12,
+            color: AppTheme.textSecondary,
+            fontStyle: FontStyle.italic),
+      );
+    }
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -405,34 +589,7 @@ class _ViewingProposalBubble extends StatelessWidget {
           const SizedBox(height: 8),
           Text('Proposed Viewing Date: $dateStr'),
           const SizedBox(height: 12),
-          if (msg.proposalStatus == 'accepted')
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.likeGreen,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                '✓ Viewing Confirmed',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12),
-              ),
-            )
-          else if (isLandlord)
-            ElevatedButton(
-              onPressed: onAccept,
-              child: const Text('Accept Viewing Date'),
-            )
-          else
-            const Text(
-              'Awaiting Landlord Confirmation...',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textSecondary,
-                  fontStyle: FontStyle.italic),
-            ),
+          status,
         ],
       ),
     );

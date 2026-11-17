@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/database_service.dart';
 import '../../../core/services/photo_storage_service.dart';
 import '../data/auth_repository.dart';
 import '../domain/auth_state.dart';
@@ -98,6 +99,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
     if (identity == null) {
       state = const AuthState(status: AuthStatus.signedOut);
+      unawaited(DatabaseService.instance.clearPrivateState());
       return;
     }
 
@@ -435,6 +437,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } catch (error) {
       debugPrint('[Auth] Sign-out notice: $error');
     }
+    await DatabaseService.instance.clearPrivateState();
     state = const AuthState(status: AuthStatus.signedOut);
   }
 

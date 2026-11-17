@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../matches/data/matches_repository.dart';
 import '../../matches/domain/match_model.dart';
 import '../domain/listing_model.dart';
 import 'listings_provider.dart';
@@ -34,17 +33,21 @@ class LandlordReviewQueueScreen extends ConsumerWidget {
     );
 
     try {
-      // The match is created first so the pending like still exists while the
-      // RLS insert policy verifies it; the queue entry is closed afterwards.
-      await ref.read(matchesRepositoryProvider).createMatch(match);
-      await ref.read(listingsRepositoryProvider).markLikeApproved(
-            listingId: listing.id,
-            requesterUid: like.requesterUid,
-          );
+      // One database function creates the match and closes the like in the
+      // same transaction. Without it a failure between the two writes could
+      // leave an approved renter with no chat, or a chat still in the queue.
+      final approved = await ref
+          .read(listingsRepositoryProvider)
+          .approveInterest(match: match);
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Approved. The chat is now in Matches.'),
+        SnackBar(
+          content: Text(
+            approved
+                ? 'Approved. The chat is now in Matches.'
+                : 'Approval saved on this device. It will sync once the '
+                    'connection is back.',
+          ),
           backgroundColor: AppTheme.navyDark,
         ),
       );
@@ -52,6 +55,63 @@ class LandlordReviewQueueScreen extends ConsumerWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not approve this request: $error')),
+      );
+    }
+  }
+
+  Future<void> _reject(
+    BuildContext context,
+    WidgetRef ref,
+    ListingLike like,
+  ) async {
+    try {
+      final rejected = await ref.read(listingsRepositoryProvider).rejectInterest(
+            listingId: listing.id,
+            requesterUid: like.requesterUid,
+          );
+      if (!context.mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            rejected
+                ? 'Passed on ${like.displayName}. They will not be notified.'
+                : 'Rejection saved on this device. It will sync once the '
+                    'connection is back.',
+          ),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              try {
+                final reopened = await ref
+                    .read(listingsRepositoryProvider)
+                    .reopenInterest(
+                      listingId: listing.id,
+                      requesterUid: like.requesterUid,
+                    );
+                if (!reopened) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'The request is back here. The undo will sync once the '
+                        'connection is back.',
+                      ),
+                    ),
+                  );
+                }
+              } catch (error) {
+                messenger.showSnackBar(
+                  SnackBar(content: Text('Could not undo that: $error')),
+                );
+              }
+            },
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not pass on this request: $error')),
       );
     }
   }
@@ -114,9 +174,22 @@ class LandlordReviewQueueScreen extends ConsumerWidget {
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                       subtitle: const Text('Wants to view this place'),
-                      trailing: FilledButton(
-                        onPressed: () => _approve(context, ref, like),
-                        child: const Text('Approve'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            key: Key('reject_interest_${like.requesterUid}'),
+                            tooltip: 'Not a fit',
+                            onPressed: () => _reject(context, ref, like),
+                            icon: const Icon(Icons.close,
+                                color: AppTheme.passRed),
+                          ),
+                          const SizedBox(width: 4),
+                          FilledButton(
+                            onPressed: () => _approve(context, ref, like),
+                            child: const Text('Approve'),
+                          ),
+                        ],
                       ),
                     ),
                   );

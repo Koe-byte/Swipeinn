@@ -53,35 +53,46 @@ class FakeMatchesRepository implements MatchesRepository {
   }
 
   @override
-  Future<void> createMatch(MatchModel match) async {
+  Future<bool> createMatch(MatchModel match) async {
     matches[match.id] = match;
     _matchesController.add(null);
+    return true;
   }
 
   @override
-  Future<void> updateMatch(MatchModel match) async {
+  Future<bool> updateMatch(MatchModel match) async {
     matches[match.id] = match;
     _matchesController.add(null);
+    return true;
   }
 
   @override
-  Future<void> sendMessage({
+  Future<bool> sendMessage({
     required MatchModel match,
     required MessageModel message,
   }) async {
     messages.putIfAbsent(match.id, () => {})[message.id] = message;
     _messageController(match.id).add(null);
 
+    // Mirrors the database trigger: one insert updates the summary and, for a
+    // proposal, moves the match to "proposed" at the same time.
     final updated = match.copyWith(
       messagesCount: match.messagesCount + 1,
       lastMessage: message.text,
+      viewingStatus: message.type == MessageType.viewingProposal
+          ? ViewingStatus.proposed
+          : null,
+      viewingDate: message.type == MessageType.viewingProposal
+          ? message.viewingDate
+          : null,
     );
     matches[match.id] = updated;
     _matchesController.add(null);
+    return true;
   }
 
   @override
-  Future<void> updateProposal({
+  Future<bool> updateProposal({
     required String matchId,
     required String messageId,
     required String status,
@@ -113,6 +124,7 @@ class FakeMatchesRepository implements MatchesRepository {
       );
       _matchesController.add(null);
     }
+    return true;
   }
 
   void dispose() {

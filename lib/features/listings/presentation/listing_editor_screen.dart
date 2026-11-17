@@ -38,6 +38,7 @@ class _ListingEditorScreenState extends ConsumerState<ListingEditorScreen> {
   late PropertyType _propertyType;
   late ListingStatus _status;
   late Set<String> _amenities;
+  late int _capacity;
 
   /// Public URLs already saved on the listing.
   late List<String> _photos;
@@ -63,6 +64,7 @@ class _ListingEditorScreenState extends ConsumerState<ListingEditorScreen> {
     _propertyType = listing?.propertyType ?? PropertyType.room;
     _status = listing?.status ?? ListingStatus.available;
     _amenities = {...?listing?.amenities};
+    _capacity = listing?.capacity ?? 1;
     _photos = [...?listing?.photos];
   }
 
@@ -167,6 +169,7 @@ class _ListingEditorScreenState extends ConsumerState<ListingEditorScreen> {
                   description.isEmpty ? 'Newly posted listing.' : description,
               monthlyRent: rent,
               propertyType: _propertyType,
+              capacity: _capacity,
               photos: photos,
               amenities: _amenities.toList()..sort(),
               latitude: 14.6090,
@@ -180,6 +183,7 @@ class _ListingEditorScreenState extends ConsumerState<ListingEditorScreen> {
                   description.isEmpty ? 'Newly posted listing.' : description,
               monthlyRent: rent,
               propertyType: _propertyType,
+              capacity: _capacity,
               photos: photos,
               amenities: _amenities.toList()..sort(),
               status: _status,
@@ -304,6 +308,48 @@ class _ListingEditorScreenState extends ConsumerState<ListingEditorScreen> {
                   onSelected: (_) => setState(() => _propertyType = type),
                 );
               }).toList(),
+            ),
+            const SizedBox(height: 20),
+            const _FieldLabel('Accommodates'),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.people_alt_outlined,
+                      size: 20, color: AppTheme.navyDark),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _capacity == 1
+                          ? 'Good for 1 person'
+                          : 'Good for $_capacity people',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('listing_capacity_minus'),
+                    tooltip: 'Fewer people',
+                    onPressed: _capacity > 1
+                        ? () => setState(() => _capacity--)
+                        : null,
+                    icon: const Icon(Icons.remove_circle_outline),
+                  ),
+                  IconButton(
+                    key: const Key('listing_capacity_plus'),
+                    tooltip: 'More people',
+                    onPressed: _capacity < 20
+                        ? () => setState(() => _capacity++)
+                        : null,
+                    icon: const Icon(Icons.add_circle_outline),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 20),
             const _FieldLabel('Amenities'),

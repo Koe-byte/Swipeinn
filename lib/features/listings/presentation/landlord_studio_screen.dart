@@ -133,7 +133,9 @@ class LandlordStudioScreen extends ConsumerWidget {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '₱${listing.monthlyRent.toStringAsFixed(0)} / month • ${listing.propertyType.label.toUpperCase()}',
+                                  '₱${listing.monthlyRent.toStringAsFixed(0)} / month • '
+                                  '${listing.propertyType.label.toUpperCase()} • '
+                                  'FITS ${listing.capacity}',
                                   style: const TextStyle(
                                     color: AppTheme.primaryDarkAmber,
                                     fontWeight: FontWeight.w700,

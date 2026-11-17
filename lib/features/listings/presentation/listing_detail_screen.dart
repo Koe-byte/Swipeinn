@@ -1,10 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/navigation/route_names.dart';
-import '../../../core/services/photo_storage_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/empty_state_view.dart';
 import '../../auth/presentation/auth_provider.dart';
@@ -36,7 +33,7 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
     final navigator = Navigator.of(context);
 
     try {
-      await ref.read(listingsRepositoryProvider).like(
+      final synced = await ref.read(listingsRepositoryProvider).like(
             listingId: listing.id,
             requesterUid: user.uid,
             requesterName: user.displayName,
@@ -45,7 +42,12 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
       navigator.pop(true);
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Liked "${listing.title}"! Sent to the owner.'),
+          content: Text(
+            synced
+                ? 'Liked "${listing.title}"! Sent to the owner.'
+                : 'Liked "${listing.title}" on this device. It will sync once '
+                    'the connection is back.',
+          ),
           duration: const Duration(seconds: 1),
           backgroundColor: AppTheme.navyDark,
         ),
@@ -65,8 +67,8 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Delete listing?'),
         content: Text(
-          '"${listing.title}" will be removed from Discover. This cannot be '
-          'undone.',
+          '"${listing.title}" will be removed from Discover and My Listings. '
+          'Existing chats and viewing history are kept.',
         ),
         actions: [
           TextButton(
@@ -90,20 +92,12 @@ class _ListingDetailScreenState extends ConsumerState<ListingDetailScreen> {
         await ref.read(listingsRepositoryProvider).deleteListing(listing.id);
     if (!mounted) return;
 
-    // Only clean up the bucket once the row is actually gone; otherwise a
-    // failed delete would leave a listing pointing at missing photos.
-    if (deleted) {
-      for (final photo in listing.photos) {
-        unawaited(PhotoStorageService.instance.deletePhotoByUrl(photo));
-      }
-    }
-
     navigator.pop();
     messenger.showSnackBar(
       SnackBar(
         content: Text(
           deleted
-              ? '"${listing.title}" was deleted.'
+              ? '"${listing.title}" was deleted. Existing chats were kept.'
               : '"${listing.title}" was removed here. Other devices may still '
                   'show it until they reconnect.',
         ),
@@ -260,6 +254,23 @@ class _ListingBody extends StatelessWidget {
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.people_alt_outlined,
+                            size: 18, color: AppTheme.textSecondary),
+                        const SizedBox(width: 6),
+                        Text(
+                          listing.capacity == 1
+                              ? 'Fits 1 person'
+                              : 'Fits ${listing.capacity} people',
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                     const Divider(height: 32),
                     const _SectionTitle('About this place'),

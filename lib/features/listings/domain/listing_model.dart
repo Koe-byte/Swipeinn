@@ -31,12 +31,21 @@ class ListingModel {
   final String description;
   final double monthlyRent;
   final PropertyType propertyType;
+
+  /// How many people the place can accommodate. Old rows predate the field and
+  /// read as 1 so the card always has something honest to show.
+  final int capacity;
+
   final List<String> photos;
   final List<String> amenities;
   final double latitude;
   final double longitude;
   final ListingStatus status;
   final DateTime createdAt;
+
+  /// Set when the owner removes the place. The row stays so existing matches,
+  /// messages and viewing history keep working.
+  final DateTime? deletedAt;
 
   const ListingModel({
     required this.id,
@@ -45,15 +54,19 @@ class ListingModel {
     required this.description,
     required this.monthlyRent,
     required this.propertyType,
+    this.capacity = 1,
     this.photos = const [],
     this.amenities = const [],
     required this.latitude,
     required this.longitude,
     this.status = ListingStatus.available,
     required this.createdAt,
+    this.deletedAt,
   });
 
   bool isOwnedBy(String? uid) => uid != null && uid == ownerUid;
+
+  bool get isDeleted => deletedAt != null;
 
   Map<String, dynamic> toMap() {
     return {
@@ -63,12 +76,14 @@ class ListingModel {
       'description': description,
       'monthlyRent': monthlyRent,
       'propertyType': propertyType.name,
+      'capacity': capacity,
       'photos': photos,
       'amenities': amenities,
       'latitude': latitude,
       'longitude': longitude,
       'status': status.name,
       'createdAt': createdAt.millisecondsSinceEpoch,
+      if (deletedAt != null) 'deletedAt': deletedAt!.millisecondsSinceEpoch,
     };
   }
 
@@ -85,6 +100,7 @@ class ListingModel {
         map['propertyType'],
         map['roomType'],
       ),
+      capacity: (map['capacity'] as num?)?.toInt() ?? 1,
       photos: List<String>.from(map['photos'] ?? const []),
       amenities: List<String>.from(map['amenities'] ?? const []),
       latitude: (map['latitude'] as num?)?.toDouble() ?? 14.6091,
@@ -97,6 +113,10 @@ class ListingModel {
         (map['createdAt'] as num?)?.toInt() ??
             DateTime.now().millisecondsSinceEpoch,
       ),
+      deletedAt: map['deletedAt'] is num
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (map['deletedAt'] as num).toInt())
+          : null,
     );
   }
 
@@ -105,9 +125,11 @@ class ListingModel {
     String? description,
     double? monthlyRent,
     PropertyType? propertyType,
+    int? capacity,
     List<String>? photos,
     List<String>? amenities,
     ListingStatus? status,
+    DateTime? deletedAt,
   }) {
     return ListingModel(
       id: id,
@@ -116,12 +138,14 @@ class ListingModel {
       description: description ?? this.description,
       monthlyRent: monthlyRent ?? this.monthlyRent,
       propertyType: propertyType ?? this.propertyType,
+      capacity: capacity ?? this.capacity,
       photos: photos ?? this.photos,
       amenities: amenities ?? this.amenities,
       latitude: latitude,
       longitude: longitude,
       status: status ?? this.status,
       createdAt: createdAt,
+      deletedAt: deletedAt ?? this.deletedAt,
     );
   }
 }
@@ -129,6 +153,7 @@ class ListingModel {
 enum LikeStatus {
   pending,
   approved,
+  rejected,
 }
 
 /// One account's interest in one listing. The document ID is the requester's
@@ -190,5 +215,37 @@ class ListingLike {
     return requesterUid.length > 12
         ? 'Renter ${requesterUid.substring(requesterUid.length - 6)}'
         : requesterUid;
+  }
+}
+
+/// A private "not for me" decision on one listing.
+///
+/// Passes never reach the owner: ADR 0003 keeps left swipes in an actor-private
+/// store, unlike a like which is mirrored into the listing's review queue. The
+/// document id is deterministic so [DatabaseService] can address it as a normal
+/// single-key row.
+class ListingPass {
+  final String listingId;
+  final String requesterUid;
+  final DateTime passedAt;
+
+  const ListingPass({
+    required this.listingId,
+    required this.requesterUid,
+    required this.passedAt,
+  });
+
+  static String idFor(String listingId, String requesterUid) =>
+      '${listingId}_$requesterUid';
+
+  String get id => idFor(listingId, requesterUid);
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'listingId': listingId,
+      'requesterUid': requesterUid,
+      'passedAt': passedAt.millisecondsSinceEpoch,
+    };
   }
 }

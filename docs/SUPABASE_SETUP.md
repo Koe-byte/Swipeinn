@@ -36,6 +36,16 @@ In order, in the SQL editor (<https://supabase.com/dashboard/project/bjvsuzpqnzp
    realtime publication.
 4. `supabase/migrations/0004_storage_avatars.sql` — repairs the storage policies
    if 0003's bucket exists without them, and adds the `avatars` bucket.
+5. `supabase/migrations/0005_repair_listings_visibility.sql` — re-creates the
+   signed-in read policy on `listings` and makes sure the table is published to
+   Realtime, so Discover shows listings from every account.
+6. `supabase/migrations/0006_chat_reliability_and_soft_delete.sql` — adds
+   soft-deleted listings, recipient-only proposal responses, atomic interest
+   approval, active-match message writes, and trigger-maintained match
+   summaries.
+7. `supabase/migrations/0007_capacity_and_passes.sql` — adds the listing
+   `capacity` column, the requester-only `listing_passes` table for private
+   left swipes, and the owner reject/reopen policy on `listing_likes`.
 
 Each file is idempotent enough to re-run: tables use `if not exists`, policies are
 dropped before creation, and the publication loop ignores duplicates.
@@ -43,6 +53,10 @@ dropped before creation, and the publication loop ignores duplicates.
 `0004` is the one to re-run when a photo upload fails with
 `403 new row violates row-level security policy`: that is the signature of a
 bucket that exists while its write policies do not.
+
+`0006` is the one to run when accepting a viewing proposal says the function is
+missing, or when an approved renter has no chat. It also stops deleting a
+listing from erasing its conversations.
 
 With the CLI instead of the dashboard:
 
@@ -141,17 +155,30 @@ Two details that are easy to get wrong:
 
 ## 7. Security model
 
-Full detail is in `supabase/migrations/0002_security.sql`. In short:
+Full detail is in `supabase/migrations/0002_security.sql` and
+`supabase/migrations/0006_chat_reliability_and_soft_delete.sql`. In short:
 
 - `users` — owner-only read/write.
 - `listings` — readable by any signed-in account, writable by the verified owner.
+  A deleted listing sets `deletedAt` instead of removing the row, so its chats
+  survive; other accounts stop seeing it.
 - `listing_likes` — the requester sees their own row, the listing owner sees the
   queue; only the owner may approve, and a trigger keeps the requester fields
-  immutable.
+  immutable. Approval runs through `approve_interest(...)`, which creates the
+  match and closes the like in one transaction.
 - `matches` — participants only; creation requires an existing like on the
-  owner's own listing; participant columns are frozen by a trigger.
-- `messages` — participants only; the sender must be the writer; a trigger keeps
-  message content immutable, so only `proposalStatus` and `viewingDate` move.
+  owner's own listing; participant columns are frozen by a trigger. Message
+  inserts update `messagesCount`/`lastMessage`/`viewingStatus` in the same
+  transaction.
+- `messages` — participants only and only while the match is active; the sender
+  must be the writer; a trigger keeps message content immutable. Proposal
+  responses go through `respond_to_viewing_proposal(...)`: only the recipient of
+  a pending proposal may accept or decline, and the match's `viewingStatus`
+  follows in the same transaction.
+
+One consequence for rule authors: a client can no longer update a message
+directly unless it is the recipient of a still-pending viewing proposal. The
+`respond_to_viewing_proposal` function is the supported path.
 
 `is_verified()` reads `auth.users.email_confirmed_at` because the JWT carries no
 `email_verified` claim. If every write suddenly returns permission-denied for a
@@ -169,12 +196,16 @@ flutter run -d chrome --dart-define-from-file=supabase.env.json
 Then, with two verified accounts in two browsers:
 
 1. Account A publishes a place **with at least one photo**; the photo appears in
-   My Listings, Discover and the detail screen.
+   My Listings and the detail screen. A does **not** see their own place in
+   Discover; account B does.
 2. Account B likes it, A approves from the Review Queue, both see the match.
-3. A and B exchange messages; a viewing proposal can be accepted in chat.
+3. Either side can send the first message. A proposes a viewing and B accepts;
+   B proposes another viewing and A accepts; neither side sees Accept on their
+   own proposal.
 4. A edits the listing, removes a photo, and saves; the object disappears from
    the bucket.
-5. A deletes the listing; the row is gone from Discover for B.
+5. A deletes the listing; it disappears from Discover and My Listings, while the
+   existing chat and its messages remain for both accounts.
 6. A opens Profile, taps the camera badge, picks a picture, and the new avatar
    appears immediately and after a cold restart. Removing it restores the
    initial.
@@ -189,6 +220,12 @@ Then, with two verified accounts in two browsers:
 | Every write is permission-denied | `public.is_verified()` missing, or email not confirmed with Confirm email on. |
 | Streams show initial rows then freeze | Table missing from the `supabase_realtime` publication. |
 | Streams work but updates from the other browser never arrive | `replica identity full` not set on the table. |
+| Discover only shows the signed-in account's listings | `listings_select_signed_in` missing or owner-scoped, Realtime subscription failing, or the onboarding budget filter hiding the rest. Run `0005_repair_listings_visibility.sql`, then use the refresh button in Discover. |
+| Publish says the listing is live but the other account cannot see it | The cloud write was queued locally; check the Supabase logs for an RLS rejection, then re-run `0002_security.sql`. |
+| Accepting a proposal fails with "function not found" | `0006_chat_reliability_and_soft_delete.sql` has not been applied. |
+| The sender sees Accept on their own proposal | The recipient check lives in `respond_to_viewing_proposal`; re-run `0006`. |
+| Approving interest creates a chat but leaves the renter in the queue | The old two-write approval ran; re-run `0006` so `approve_interest` replaces it. |
+| Deleting a listing erases its chats | The hard-delete path is still active; apply `0006` and check `listings."deletedAt"` exists. |
 | Upload rejected with 403 | Storage policies missing while the bucket exists — run `0004_storage_avatars.sql`. Also check the path is `users/{uid}/...` and the file is a supported image under 5 MB. |
 | Avatar upload rejected | Same as above, plus the file must use a MIME type allowed on the `avatars` bucket. |
 | Photo URL 400/404 | Bucket is not public, or the object was uploaded under a different uid. |
